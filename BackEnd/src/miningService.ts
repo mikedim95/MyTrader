@@ -1,4 +1,5 @@
 import { MinerBasicInfo, MiningOverviewResponse, NicehashOverviewResponse } from "./types.js";
+import { getNicehashAccountSnapshot, getNicehashMiningSnapshot } from "./nicehashClient.js";
 
 const INACTIVE_STATUSES = new Set(["offline", "rebooting"]);
 
@@ -100,6 +101,26 @@ function parseMinersFromEnv(): MinerBasicInfo[] {
         numberFromUnknown(obj.earningsEstimate) ??
         null;
 
+      const algorithm = stringFromUnknown(obj.algorithm);
+      const market = stringFromUnknown(obj.market);
+      const profitabilityBTC =
+        numberFromUnknown(obj.profitabilityBTC) ??
+        numberFromUnknown(obj.profitability_btc) ??
+        numberFromUnknown(obj.estimatedDailyRevenueBTC) ??
+        null;
+      const unpaidAmountBTC =
+        numberFromUnknown(obj.unpaidAmountBTC) ??
+        numberFromUnknown(obj.unpaid_amount_btc) ??
+        numberFromUnknown(obj.unpaidAmount) ??
+        null;
+      const acceptedSpeed =
+        numberFromUnknown(obj.acceptedSpeed) ??
+        numberFromUnknown(obj.accepted_speed) ??
+        numberFromUnknown(obj.hashrate) ??
+        null;
+      const acceptedSpeedUnit = stringFromUnknown(obj.acceptedSpeedUnit) ?? stringFromUnknown(obj.hashrateUnit);
+      const rejectedSpeed = numberFromUnknown(obj.rejectedSpeed) ?? numberFromUnknown(obj.rejected_speed) ?? null;
+
       return {
         id,
         name,
@@ -110,6 +131,13 @@ function parseMinersFromEnv(): MinerBasicInfo[] {
         pool,
         lastSeen,
         estimatedDailyRevenueUSD,
+        algorithm,
+        market,
+        profitabilityBTC,
+        unpaidAmountBTC,
+        acceptedSpeed,
+        acceptedSpeedUnit,
+        rejectedSpeed,
       };
     })
     .filter((miner): miner is MinerBasicInfo => miner !== null);
@@ -119,6 +147,17 @@ function sumNumbers(values: Array<number | null>): number | null {
   const present = values.filter((value): value is number => value !== null);
   if (present.length === 0) return null;
   return present.reduce((sum, value) => sum + value, 0);
+}
+
+function activeCountFromMiners(miners: MinerBasicInfo[]): number | null {
+  if (miners.length === 0) return null;
+  return miners.filter((miner) => !INACTIVE_STATUSES.has(miner.status.trim().toLowerCase())).length;
+}
+
+function deriveSingleAlgorithm(miners: MinerBasicInfo[]): string | null {
+  const algorithms = Array.from(new Set(miners.map((miner) => miner.algorithm).filter((value): value is string => !!value)));
+  if (algorithms.length === 1) return algorithms[0];
+  return null;
 }
 
 function hasMiningEnvInput(): boolean {
@@ -185,17 +224,25 @@ export function getMiningOverviewData(): MiningOverviewResponse {
   };
 }
 
-export function getNicehashOverviewData(): NicehashOverviewResponse {
-  const miners = parseMinersFromEnv().filter((miner) => miner.pool?.toLowerCase().includes("nicehash"));
+export async function getNicehashOverviewData(): Promise<NicehashOverviewResponse> {
+  const envMiners = parseMinersFromEnv().filter((miner) => miner.pool?.toLowerCase().includes("nicehash"));
+  const [account, mining] = await Promise.all([getNicehashAccountSnapshot(), getNicehashMiningSnapshot()]);
+  const miners = mining.miners.length > 0 ? mining.miners : envMiners;
 
   const connectedOverride = parseBoolean(process.env.NICEHASH_CONNECTED);
   const poolStatus = parseString(process.env.NICEHASH_POOL_STATUS);
 
   const assignedMiners =
-    parseNumber(process.env.NICEHASH_ASSIGNED_MINERS) ?? (miners.length > 0 ? miners.length : null);
+    parseNumber(process.env.NICEHASH_ASSIGNED_MINERS) ??
+    mining.assignedMiners ??
+    (miners.length > 0 ? miners.length : null);
+
+  const activeMiners = mining.activeMiners ?? activeCountFromMiners(miners);
 
   const hashrateTH =
-    parseNumber(process.env.NICEHASH_HASHRATE_TH) ?? sumNumbers(miners.map((miner) => miner.hashrateTH));
+    parseNumber(process.env.NICEHASH_HASHRATE_TH) ??
+    mining.hashrateTH ??
+    sumNumbers(miners.map((miner) => miner.hashrateTH));
 
   const powerW = parseNumber(process.env.NICEHASH_POWER_W) ?? sumNumbers(miners.map((miner) => miner.powerW));
 
@@ -203,29 +250,60 @@ export function getNicehashOverviewData(): NicehashOverviewResponse {
     parseNumber(process.env.NICEHASH_EST_DAILY_REVENUE_USD) ??
     sumNumbers(miners.map((miner) => miner.estimatedDailyRevenueUSD));
 
+  const estimatedDailyRevenueBTC =
+    mining.totalProfitabilityBTC ?? sumNumbers(miners.map((miner) => miner.profitabilityBTC));
+
+  const unpaidAmountBTC = mining.unpaidAmountBTC ?? sumNumbers(miners.map((miner) => miner.unpaidAmountBTC));
+
   const hasSource =
     connectedOverride !== null ||
     poolStatus !== null ||
     parseString(process.env.NICEHASH_POOL_URL) !== null ||
     parseString(process.env.NICEHASH_ALGORITHM) !== null ||
-    miners.length > 0;
+    miners.length > 0 ||
+    account.source === "env" ||
+    mining.source === "env";
 
   const connected =
     connectedOverride ??
-    (poolStatus ? poolStatus.trim().toLowerCase() === "connected" : miners.length > 0);
+    (poolStatus
+      ? poolStatus.trim().toLowerCase() === "connected"
+      : mining.connected || account.connected || miners.length > 0);
+
+  const message = !hasSource
+    ? "No NiceHash data source configured."
+    : mining.source === "env" && !mining.connected
+      ? mining.message
+      : account.source === "env" && !account.connected && !mining.connected
+        ? account.message
+        : undefined;
+
+  const algorithm =
+    parseString(process.env.NICEHASH_ALGORITHM) ??
+    mining.algorithm ??
+    deriveSingleAlgorithm(miners);
+
+  const miningAddress = mining.miningAddress;
+  const poolUrl = parseString(process.env.NICEHASH_POOL_URL);
 
   return {
     source: hasSource ? "env" : "none",
     connected,
-    message: hasSource ? undefined : "No NiceHash data source configured.",
-    poolStatus: poolStatus ?? (connected ? "Connected" : null),
+    message,
+    poolStatus: poolStatus ?? (hasSource ? (connected ? "Connected" : "Disconnected") : null),
     poolName: parseString(process.env.NICEHASH_POOL_NAME) ?? (hasSource ? "NiceHash" : null),
-    poolUrl: parseString(process.env.NICEHASH_POOL_URL),
-    algorithm: parseString(process.env.NICEHASH_ALGORITHM),
+    poolUrl,
+    algorithm,
+    miningAddress,
     assignedMiners,
+    activeMiners,
     hashrateTH,
     powerW,
     estimatedDailyRevenueUSD,
+    estimatedDailyRevenueBTC,
+    unpaidAmountBTC,
+    accountTotalBTC: account.totalBtc,
+    assets: account.assets,
     miners,
     generatedAt: new Date().toISOString(),
   };

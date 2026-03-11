@@ -100,8 +100,8 @@ app.get("/api/mining/overview", (_req, res) => {
   res.json(overview);
 });
 
-app.get("/api/mining/nicehash", (_req, res) => {
-  const overview = getNicehashOverviewData();
+app.get("/api/mining/nicehash", async (_req, res) => {
+  const overview = await getNicehashOverviewData();
   res.json(overview);
 });
 

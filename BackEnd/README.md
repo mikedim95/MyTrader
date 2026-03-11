@@ -52,6 +52,13 @@ The API runs on `http://localhost:3001` by default.
 
 You can provide mining data from your own collector by setting these variables:
 
+- `NICEHASH_API_KEY`
+- `NICEHASH_API_SECRET`
+- `NICEHASH_ORG_ID`
+- `NICEHASH_API_HOST` (default: `https://api2.nicehash.com`)
+
+For live rig data in the NiceHash tab, the NiceHash API key should include `VMDS` (view mining data) in addition to wallet read access.
+
 - `MINERS_BASIC_JSON` (JSON array of miner objects)
 - `MINING_TOTAL_MINERS`
 - `MINING_ACTIVE_MINERS`

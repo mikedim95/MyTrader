@@ -1,21 +1,105 @@
+import { useEffect, useState } from "react";
 import { Lock } from "lucide-react";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { useNicehashOverview } from "@/hooks/useTradingData";
+import { BulkActionToolbar } from "@/components/miners/BulkActionToolbar";
+import { MinerStatusBadge } from "@/components/miners/MinerStatusBadge";
+import type { MinerStatus } from "@/data/minerMockData";
+import { Checkbox } from "@/components/ui/checkbox";
+
+function formatBalance(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "--";
+  return value.toLocaleString(undefined, { maximumFractionDigits: 8 });
+}
+
+function formatTimestamp(value: string | null | undefined): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function toMinerStatus(status: string | null | undefined): MinerStatus {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized.includes("offline") || normalized.includes("disconnected")) return "Offline";
+  if (normalized.includes("reboot")) return "Rebooting";
+  if (normalized.includes("overheat")) return "Overheating";
+  if (normalized.includes("low")) return "Low Hashrate";
+  if (normalized.includes("warning")) return "Warning";
+  if (normalized.includes("mining") || normalized.includes("online") || normalized.includes("active")) return "Online";
+  return "Warning";
+}
+
+function formatMinerHashrate(
+  acceptedSpeed: number | null | undefined,
+  acceptedSpeedUnit: string | null | undefined,
+  hashrateTH: number | null | undefined
+): string {
+  if (acceptedSpeed !== null && acceptedSpeed !== undefined) {
+    return `${acceptedSpeed.toFixed(3)} ${acceptedSpeedUnit ?? ""}`.trim();
+  }
+
+  if (hashrateTH !== null && hashrateTH !== undefined) {
+    return `${hashrateTH.toFixed(3)} TH/s`;
+  }
+
+  return "--";
+}
 
 export function NicehashPage() {
   const { data, isPending, error } = useNicehashOverview();
   const isLoading = isPending && !data;
 
   const miners = data?.miners ?? [];
+  const assets = data?.assets ?? [];
+
+  const [selectedMinerIds, setSelectedMinerIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setSelectedMinerIds((current) => {
+      const valid = new Set(miners.map((miner) => miner.id));
+      return new Set(Array.from(current).filter((id) => valid.has(id)));
+    });
+  }, [miners]);
+
+  const allSelected = miners.length > 0 && selectedMinerIds.size === miners.length;
+
+  const toggleMiner = (id: string) => {
+    setSelectedMinerIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllMiners = () => {
+    setSelectedMinerIds((current) => {
+      if (current.size === miners.length) {
+        return new Set();
+      }
+      return new Set(miners.map((miner) => miner.id));
+    });
+  };
+
+  const revenueValue =
+    data?.estimatedDailyRevenueUSD !== null && data?.estimatedDailyRevenueUSD !== undefined
+      ? `$${data.estimatedDailyRevenueUSD.toFixed(2)}`
+      : data?.estimatedDailyRevenueBTC !== null && data?.estimatedDailyRevenueBTC !== undefined
+        ? `${data.estimatedDailyRevenueBTC.toFixed(8)} BTC`
+        : undefined;
 
   return (
     <div className="p-6 space-y-4">
       <div>
         <h2 className="text-lg font-mono font-semibold text-foreground">NiceHash</h2>
-        <p className="text-sm text-muted-foreground mt-1">Basic NiceHash mining status and assignment summary.</p>
+        <p className="text-sm text-muted-foreground mt-1">Live wallet and rig status from your NiceHash account.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Pool Status</div>
           <SpinnerValue
@@ -26,10 +110,16 @@ export function NicehashPage() {
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Assigned Miners</div>
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Active / Assigned</div>
           <SpinnerValue
             loading={isLoading}
-            value={data?.assignedMiners ?? undefined}
+            value={
+              data?.assignedMiners !== null && data?.assignedMiners !== undefined
+                ? data?.activeMiners !== null && data?.activeMiners !== undefined
+                  ? `${data.activeMiners} / ${data.assignedMiners}`
+                  : `${data.assignedMiners}`
+                : undefined
+            }
             className="mt-2 text-xl font-mono font-semibold text-foreground"
           />
         </div>
@@ -45,11 +135,16 @@ export function NicehashPage() {
 
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Est. Daily Revenue</div>
+          <SpinnerValue loading={isLoading} value={revenueValue} className="mt-2 text-xl font-mono font-semibold text-foreground" />
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Total (BTC)</div>
           <SpinnerValue
             loading={isLoading}
             value={
-              data?.estimatedDailyRevenueUSD !== null && data?.estimatedDailyRevenueUSD !== undefined
-                ? `$${data.estimatedDailyRevenueUSD.toFixed(2)}`
+              data?.accountTotalBTC !== null && data?.accountTotalBTC !== undefined
+                ? data.accountTotalBTC.toFixed(8)
                 : undefined
             }
             className="mt-2 text-xl font-mono font-semibold text-foreground"
@@ -69,6 +164,16 @@ export function NicehashPage() {
           Algorithm: <SpinnerValue loading={isLoading} value={data?.algorithm ?? undefined} />
         </div>
         <div className="text-sm font-mono text-foreground">
+          Mining Address: <SpinnerValue loading={isLoading} value={data?.miningAddress ?? undefined} />
+        </div>
+        <div className="text-sm font-mono text-foreground">
+          Unpaid Balance:{" "}
+          <SpinnerValue
+            loading={isLoading}
+            value={data?.unpaidAmountBTC !== null && data?.unpaidAmountBTC !== undefined ? `${data.unpaidAmountBTC.toFixed(8)} BTC` : undefined}
+          />
+        </div>
+        <div className="text-sm font-mono text-foreground">
           Power Draw:{" "}
           <SpinnerValue
             loading={isLoading}
@@ -79,7 +184,52 @@ export function NicehashPage() {
 
       <div className="rounded-lg border border-border bg-card">
         <div className="px-5 py-4 border-b border-border">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Assets</div>
+        </div>
+
+        {isLoading ? (
+          <div className="px-5 py-6">
+            <SpinnerValue loading value={undefined} />
+          </div>
+        ) : assets.length === 0 ? (
+          <div className="px-5 py-6 text-sm text-muted-foreground">
+            No non-zero wallet assets found yet. Configure `NICEHASH_API_KEY`, `NICEHASH_API_SECRET`, and `NICEHASH_ORG_ID` in backend `.env`.
+          </div>
+        ) : (
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {["Asset", "Total", "Available", "Pending"].map((heading) => (
+                  <th
+                    key={heading}
+                    className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
+                  >
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {assets.map((asset) => (
+                <tr key={asset.currency} className="border-b border-border">
+                  <td className="py-3 px-4 text-sm font-mono text-foreground">{asset.currency}</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{formatBalance(asset.totalBalance)}</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{formatBalance(asset.available)}</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{formatBalance(asset.pending)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-border bg-card">
+        <div className="px-5 py-4 border-b border-border">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Assigned Miners</div>
+        </div>
+
+        <div className="px-5 py-3 border-b border-border">
+          <BulkActionToolbar count={selectedMinerIds.size} />
         </div>
 
         {isLoading ? (
@@ -88,13 +238,16 @@ export function NicehashPage() {
           </div>
         ) : miners.length === 0 ? (
           <div className="px-5 py-6 text-sm text-muted-foreground">
-            No live NiceHash miner records received yet. Configure `MINERS_BASIC_JSON` or NiceHash env fields.
+            No live NiceHash miner records received yet. Ensure your API key has mining data permission (VMDS).
           </div>
         ) : (
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Miner", "Model", "Status", "Hashrate", "Power", "Est. Revenue"].map((heading) => (
+                <th className="py-3 px-4 text-left w-10">
+                  <Checkbox checked={allSelected} onCheckedChange={toggleAllMiners} />
+                </th>
+                {["Miner", "Status", "Hashrate", "Algorithm", "Unpaid", "Profitability", "Last Seen"].map((heading) => (
                   <th
                     key={heading}
                     className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
@@ -107,18 +260,30 @@ export function NicehashPage() {
             <tbody>
               {miners.map((miner) => (
                 <tr key={miner.id} className="border-b border-border">
-                  <td className="py-3 px-4 text-sm font-mono text-foreground">{miner.name}</td>
-                  <td className="py-3 px-4 text-right text-sm font-mono text-muted-foreground">{miner.model}</td>
-                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{miner.status}</td>
-                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
-                    {miner.hashrateTH !== null ? `${miner.hashrateTH.toFixed(3)} TH/s` : "--"}
+                  <td className="py-3 px-4 text-left">
+                    <Checkbox checked={selectedMinerIds.has(miner.id)} onCheckedChange={() => toggleMiner(miner.id)} />
+                  </td>
+                  <td className="py-3 px-4 text-sm font-mono text-foreground text-left">
+                    {miner.name}
+                    <div className="text-[11px] text-muted-foreground">{miner.model}</div>
                   </td>
                   <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
-                    {miner.powerW !== null ? `${miner.powerW} W` : "--"}
+                    <div className="inline-flex flex-col items-end gap-1">
+                      <MinerStatusBadge status={toMinerStatus(miner.status)} />
+                      <span className="text-[10px] text-muted-foreground">{miner.status}</span>
+                    </div>
                   </td>
                   <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
-                    {miner.estimatedDailyRevenueUSD !== null ? `$${miner.estimatedDailyRevenueUSD.toFixed(2)}` : "--"}
+                    {formatMinerHashrate(miner.acceptedSpeed, miner.acceptedSpeedUnit, miner.hashrateTH)}
                   </td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{miner.algorithm ?? "--"}</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
+                    {miner.unpaidAmountBTC !== null ? `${miner.unpaidAmountBTC.toFixed(8)} BTC` : "--"}
+                  </td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
+                    {miner.profitabilityBTC !== null ? `${miner.profitabilityBTC.toFixed(8)} BTC/day` : "--"}
+                  </td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-muted-foreground">{formatTimestamp(miner.lastSeen)}</td>
                 </tr>
               ))}
             </tbody>
@@ -138,9 +303,10 @@ export function NicehashPage() {
           Coming Soon
         </div>
         <div className="mt-1">
-          Profit switching, wallet management, benchmark controls, and payout analytics are inactive for now.
+          Profit switching, wallet management, benchmark controls, and payout analytics are still inactive.
         </div>
       </div>
     </div>
   );
 }
+

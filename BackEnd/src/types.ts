@@ -84,6 +84,13 @@ export interface MinerBasicInfo {
   pool: string | null;
   lastSeen: string | null;
   estimatedDailyRevenueUSD: number | null;
+  algorithm: string | null;
+  market: string | null;
+  profitabilityBTC: number | null;
+  unpaidAmountBTC: number | null;
+  acceptedSpeed: number | null;
+  acceptedSpeedUnit: string | null;
+  rejectedSpeed: number | null;
 }
 
 export interface MiningOverviewResponse {
@@ -108,10 +115,24 @@ export interface NicehashOverviewResponse {
   poolName: string | null;
   poolUrl: string | null;
   algorithm: string | null;
+  miningAddress: string | null;
   assignedMiners: number | null;
+  activeMiners: number | null;
   hashrateTH: number | null;
   powerW: number | null;
   estimatedDailyRevenueUSD: number | null;
+  estimatedDailyRevenueBTC: number | null;
+  unpaidAmountBTC: number | null;
+  accountTotalBTC: number | null;
+  assets: NicehashAssetBalance[];
   miners: MinerBasicInfo[];
   generatedAt: string;
+}
+
+export interface NicehashAssetBalance {
+  currency: string;
+  available: number | null;
+  pending: number | null;
+  totalBalance: number | null;
+  btcRate: number | null;
 }
