@@ -1,9 +1,22 @@
 import type {
+  BacktestCreateRequest,
+  BacktestMetricsResponse,
+  BacktestResponse,
+  BacktestTimelineResponse,
+  BacktestsResponse,
   ConnectionStatus,
+  CreateBacktestResponse,
   DashboardResponse,
+  ExecutionPlanResponse,
   MiningOverviewResponse,
   NicehashOverviewResponse,
   OrdersResponse,
+  StrategiesResponse,
+  StrategyResponse,
+  StrategyRunResponse,
+  StrategyRunsResponse,
+  StrategyStateResponse,
+  StrategyValidationResponse,
 } from "@/types/api";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
@@ -65,4 +78,59 @@ export const backendApi = {
     apiRequest<ConnectionStatus>("/api/binance/connection", {
       method: "DELETE",
     }),
+
+  getStrategies: () => apiRequest<StrategiesResponse>("/api/strategies"),
+  getStrategy: (strategyId: string) => apiRequest<StrategyResponse>(`/api/strategies/${strategyId}`),
+  validateStrategy: (body: unknown) =>
+    apiRequest<StrategyValidationResponse>("/api/strategies/validate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createStrategy: (body: unknown) =>
+    apiRequest<StrategyResponse>("/api/strategies", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateStrategy: (strategyId: string, body: unknown) =>
+    apiRequest<StrategyResponse>(`/api/strategies/${strategyId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  runStrategyNow: (strategyId: string) =>
+    apiRequest<StrategyRunResponse>(`/api/strategies/${strategyId}/run-now`, {
+      method: "POST",
+    }),
+  getStrategyState: (strategyId: string) =>
+    apiRequest<StrategyStateResponse>(`/api/strategies/${strategyId}/state`),
+  getStrategyExecutionPlan: (strategyId: string) =>
+    apiRequest<ExecutionPlanResponse>(`/api/strategies/${strategyId}/execution-plan`),
+  enableStrategy: (strategyId: string) =>
+    apiRequest<StrategyResponse>(`/api/strategies/${strategyId}/enable`, {
+      method: "POST",
+    }),
+  disableStrategy: (strategyId: string) =>
+    apiRequest<StrategyResponse>(`/api/strategies/${strategyId}/disable`, {
+      method: "POST",
+    }),
+  scheduleStrategy: (strategyId: string, scheduleInterval: string) =>
+    apiRequest<StrategyResponse>(`/api/strategies/${strategyId}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduleInterval }),
+    }),
+  getStrategyRuns: () => apiRequest<StrategyRunsResponse>("/api/strategy-runs"),
+  getStrategyRun: (runId: string) => apiRequest<StrategyRunResponse>(`/api/strategy-runs/${runId}`),
+
+  createBacktest: (body: BacktestCreateRequest) =>
+    apiRequest<CreateBacktestResponse>("/api/backtests", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getBacktests: () => apiRequest<BacktestsResponse>("/api/backtests"),
+  getBacktest: (backtestId: string) => apiRequest<BacktestResponse>(`/api/backtests/${backtestId}`),
+  getBacktestTimeline: (backtestId: string) =>
+    apiRequest<BacktestTimelineResponse>(`/api/backtests/${backtestId}/timeline`),
+  getBacktestMetrics: (backtestId: string) =>
+    apiRequest<BacktestMetricsResponse>(`/api/backtests/${backtestId}/metrics`),
 };
+
+export type { ConnectRequest };

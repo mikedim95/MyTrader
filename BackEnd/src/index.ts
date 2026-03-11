@@ -9,6 +9,11 @@ import {
 } from "./binanceClient.js";
 import { getMiningOverviewData, getNicehashOverviewData } from "./miningService.js";
 import { getDashboardData, getOrdersData } from "./portfolioService.js";
+import { BacktestEngine } from "./strategy/backtest-engine.js";
+import { StrategyRepository } from "./strategy/strategy-repository.js";
+import { StrategyRunner } from "./strategy/strategy-runner.js";
+import { StrategyScheduler } from "./strategy/strategy-scheduler.js";
+import { createStrategyRouter } from "./strategy/strategy-api.js";
 
 const app = express();
 
@@ -17,6 +22,13 @@ const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:8080")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const rawSchedulerPollMs = Number(process.env.STRATEGY_SCHEDULER_POLL_MS ?? 15_000);
+const schedulerPollMs = Number.isFinite(rawSchedulerPollMs) && rawSchedulerPollMs >= 5_000 ? rawSchedulerPollMs : 15_000;
+
+const strategyRepository = new StrategyRepository(process.env.STRATEGY_STORE_PATH);
+const strategyRunner = new StrategyRunner(strategyRepository);
+const backtestEngine = new BacktestEngine(strategyRepository);
+const strategyScheduler = new StrategyScheduler(strategyRepository, strategyRunner, schedulerPollMs);
 
 app.use(
   cors({
@@ -105,12 +117,38 @@ app.get("/api/mining/nicehash", async (_req, res) => {
   res.json(overview);
 });
 
+app.use(
+  "/api",
+  createStrategyRouter({
+    repository: strategyRepository,
+    runner: strategyRunner,
+    backtestEngine,
+  })
+);
+
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   const message = error instanceof Error ? error.message : "Unexpected server error.";
   res.status(500).json({ message });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   // Keep startup log minimal and avoid printing credentials.
   console.log(`Backend listening on http://localhost:${port}`);
 });
+
+strategyScheduler.start().catch((error) => {
+  console.error(
+    "[strategy-scheduler] Failed to start:",
+    error instanceof Error ? error.message : error
+  );
+});
+
+const shutdown = (): void => {
+  strategyScheduler.stop();
+  server.close(() => {
+    process.exit(0);
+  });
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

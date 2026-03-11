@@ -23,6 +23,8 @@ interface SidebarProps {
 const navItems = [
   { id: "portfolio", label: "Portfolio", icon: Briefcase },
   { id: "trading", label: "Trading", icon: ClipboardList },
+  { id: "rebalance", label: "Rebalance", icon: RefreshCw },
+  { id: "automation", label: "Automation", icon: Bot },
   { id: "asic-miners", label: "ASIC Miners", icon: HardDrive },
   { id: "nicehash", label: "NiceHash", icon: Cpu },
 ];
@@ -30,8 +32,6 @@ const navItems = [
 const comingSoon = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "markets", label: "Markets", icon: BarChart3 },
-  { id: "rebalance", label: "Rebalance", icon: RefreshCw },
-  { id: "automation", label: "Automation", icon: Bot },
   { id: "orders", label: "Orders", icon: ClipboardList },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -56,9 +56,15 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
       </div>
 
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
-        <div className={cn("text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2", collapsed ? "text-center" : "px-3")}>
+        <div
+          className={cn(
+            "text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-2",
+            collapsed ? "text-center" : "px-3"
+          )}
+        >
           {collapsed ? "--" : "Main"}
         </div>
+
         {navItems.map((item) => {
           const active = currentPage === item.id;
           return (
@@ -79,9 +85,15 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
           );
         })}
 
-        <div className={cn("text-[10px] font-mono uppercase tracking-wider text-muted-foreground mt-6 mb-2", collapsed ? "text-center" : "px-3")}>
+        <div
+          className={cn(
+            "text-[10px] font-mono uppercase tracking-wider text-muted-foreground mt-6 mb-2",
+            collapsed ? "text-center" : "px-3"
+          )}
+        >
           {collapsed ? "--" : "Coming Soon"}
         </div>
+
         {comingSoon.map((item) => (
           <div
             key={item.id}

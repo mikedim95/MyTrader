@@ -1,98 +1,367 @@
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Pie, PieChart, Cell, ResponsiveContainer } from "recharts";
+import { backendApi } from "@/lib/api";
+import { useStrategies, useStrategyState } from "@/hooks/useTradingData";
 import { cn } from "@/lib/utils";
-import { useDashboardData } from "@/hooks/useTradingData";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
-const COLORS = [
-  "hsl(168, 100%, 48%)", "hsl(230, 60%, 60%)", "hsl(340, 100%, 62%)",
-  "hsl(45, 100%, 60%)", "hsl(280, 60%, 60%)", "hsl(200, 80%, 50%)"
+const CHART_COLORS = [
+  "hsl(168, 100%, 48%)",
+  "hsl(230, 60%, 60%)",
+  "hsl(340, 100%, 62%)",
+  "hsl(45, 100%, 60%)",
+  "hsl(200, 80%, 50%)",
+  "hsl(280, 60%, 60%)",
+  "hsl(120, 65%, 45%)",
+  "hsl(10, 85%, 58%)",
 ];
 
+function formatDateTime(value: string | undefined): string {
+  if (!value) return "--";
+
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return "--";
+
+  return parsed.toLocaleString();
+}
+
+function formatPercent(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value.toFixed(2)}%`;
+}
+
+function formatUsd(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
 export function RebalancePage() {
-  const { data } = useDashboardData();
-  const assets = data?.assets ?? [];
-  const currentData = assets.map((a) => ({ name: a.symbol, value: a.allocation }));
-  const targetData = assets.map((a) => ({ name: a.symbol, value: a.targetAllocation }));
+  const queryClient = useQueryClient();
+
+  const { data: strategiesData, isPending: loadingStrategies, error: strategiesError } = useStrategies();
+  const strategies = strategiesData?.strategies ?? [];
+
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string>("");
+  const [message, setMessage] = useState<string>("");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+
+  useEffect(() => {
+    if ((!selectedStrategyId || !strategies.some((strategy) => strategy.id === selectedStrategyId)) && strategies.length > 0) {
+      setSelectedStrategyId(strategies[0].id);
+    }
+  }, [selectedStrategyId, strategies]);
+
+  const selectedStrategy = useMemo(
+    () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
+    [selectedStrategyId, strategies]
+  );
+
+  const {
+    data: state,
+    isPending: loadingState,
+    error: stateError,
+  } = useStrategyState(selectedStrategyId || undefined);
+
+  const runNowMutation = useMutation({
+    mutationFn: (strategyId: string) => backendApi.runStrategyNow(strategyId),
+    onSuccess: async (result) => {
+      setErrorMessage("");
+      setMessage(`Strategy run created with status: ${result.run.status}.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["strategy-runs"] }),
+        queryClient.invalidateQueries({ queryKey: ["strategies"] }),
+        queryClient.invalidateQueries({ queryKey: ["strategy-state", selectedStrategyId] }),
+        queryClient.invalidateQueries({ queryKey: ["strategy-execution-plan", selectedStrategyId] }),
+      ]);
+    },
+    onError: (error) => {
+      setMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to run strategy.");
+    },
+  });
+
+  const executionPlan = state?.executionPlan ?? null;
+  const currentAllocation = executionPlan?.currentAllocation ?? state?.currentAllocation ?? {};
+  const targetAllocation = executionPlan?.adjustedTargetAllocation ?? state?.adjustedTargetAllocation ?? {};
+
+  const allocationRows = useMemo(() => {
+    const symbols = Array.from(new Set([...Object.keys(currentAllocation), ...Object.keys(targetAllocation)])).sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+    return symbols.map((symbol) => {
+      const current = currentAllocation[symbol] ?? 0;
+      const target = targetAllocation[symbol] ?? 0;
+      const diff = target - current;
+
+      return {
+        symbol,
+        current,
+        target,
+        diff,
+      };
+    });
+  }, [currentAllocation, targetAllocation]);
+
+  const currentChart = allocationRows.map((row) => ({ name: row.symbol, value: row.current })).filter((row) => row.value > 0);
+  const targetChart = allocationRows.map((row) => ({ name: row.symbol, value: row.target })).filter((row) => row.value > 0);
+
+  const warnings = useMemo(() => {
+    const combined = [...(executionPlan?.warnings ?? []), ...(state?.warnings ?? [])];
+    return Array.from(new Set(combined));
+  }, [executionPlan?.warnings, state?.warnings]);
+
+  const handleEvaluate = (): void => {
+    if (!selectedStrategy) return;
+    runNowMutation.mutate(selectedStrategy.id);
+  };
+
+  const rebalanceRequired = executionPlan?.rebalanceRequired ?? false;
 
   return (
     <div className="p-6 space-y-6">
-      {/* Charts side by side with overlap concept */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-card border border-border rounded-lg p-5">
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-mono font-semibold text-foreground">Rebalance</h2>
+          <p className="text-sm text-muted-foreground mt-1">Evaluate strategy output and review suggested rebalance trades.</p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <select
+            value={selectedStrategyId}
+            onChange={(event) => setSelectedStrategyId(event.target.value)}
+            className="rounded-md border border-border bg-secondary px-3 py-2 text-xs font-mono text-foreground outline-none"
+          >
+            {strategies.length === 0 ? <option value="">No strategies</option> : null}
+            {strategies.map((strategy) => (
+              <option key={strategy.id} value={strategy.id}>
+                {strategy.name}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={handleEvaluate}
+            disabled={!selectedStrategy || runNowMutation.isPending}
+            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60"
+          >
+            Evaluate Now
+          </button>
+        </div>
+      </div>
+
+      {message ? (
+        <div className="rounded-md border border-positive/30 bg-positive/10 px-4 py-3 text-xs text-positive">{message}</div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">{errorMessage}</div>
+      ) : null}
+
+      {strategiesError ? (
+        <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">
+          {strategiesError instanceof Error ? strategiesError.message : "Failed to load strategies."}
+        </div>
+      ) : null}
+
+      {stateError ? (
+        <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">
+          {stateError instanceof Error ? stateError.message : "Failed to evaluate strategy state."}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Selected Strategy</div>
+          <div className="mt-2 text-sm font-mono text-foreground">{selectedStrategy?.name ?? "--"}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Rebalance Required</div>
+          <div className={cn("mt-2 text-sm font-mono", rebalanceRequired ? "text-positive" : "text-muted-foreground")}>
+            {rebalanceRequired ? "Yes" : "No"}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Drift</div>
+          <div className="mt-2 text-sm font-mono text-foreground">{formatPercent(executionPlan?.driftPct)}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Estimated Turnover</div>
+          <div className="mt-2 text-sm font-mono text-foreground">{formatPercent(executionPlan?.estimatedTurnoverPct)}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="rounded-lg border border-border bg-card p-5">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">Current Allocation</div>
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Pie data={currentData} cx="50%" cy="50%" innerRadius={55} outerRadius={100} dataKey="value" stroke="none" label={({ name, value }) => `${name} ${value}%`}>
-                {currentData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+              <Pie
+                data={currentChart}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={108}
+                dataKey="value"
+                stroke="none"
+                label={({ name, value }) => `${name} ${(value as number).toFixed(1)}%`}
+              >
+                {currentChart.map((entry, index) => (
+                  <Cell key={`${entry.name}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
               </Pie>
             </PieChart>
           </ResponsiveContainer>
         </div>
-        <div className="bg-card border border-border rounded-lg p-5">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">Target Allocation</div>
-          <ResponsiveContainer width="100%" height={260}>
+
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">Adjusted Target Allocation</div>
+          <ResponsiveContainer width="100%" height={280}>
             <PieChart>
-              <Pie data={targetData} cx="50%" cy="50%" innerRadius={55} outerRadius={100} dataKey="value" stroke="none" label={({ name, value }) => `${name} ${value}%`}>
-                {targetData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+              <Pie
+                data={targetChart}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={108}
+                dataKey="value"
+                stroke="none"
+                label={({ name, value }) => `${name} ${(value as number).toFixed(1)}%`}
+              >
+                {targetChart.map((entry, index) => (
+                  <Cell key={`${entry.name}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
               </Pie>
             </PieChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Comparison table */}
-      <div className="bg-card border border-border rounded-lg">
-        <div className="px-5 py-4 border-b border-border">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Rebalance Preview</div>
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          Allocation Delta
         </div>
         <table className="w-full">
           <thead>
             <tr className="border-b border-border">
-              {["Asset", "Current", "Target", "Difference", "Action"].map((h) => (
-                <th key={h} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{h}</th>
+              {["Asset", "Current", "Target", "Difference", "Action"].map((heading) => (
+                <th
+                  key={heading}
+                  className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
+                >
+                  {heading}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {assets.map((a) => {
-              const diff = a.targetAllocation - a.allocation;
-              return (
-                <tr key={a.id} className="border-b border-border">
-                  <td className="py-3 px-4">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded bg-secondary flex items-center justify-center">
-                        <span className="text-[9px] font-mono font-semibold text-foreground">{a.symbol.slice(0, 2)}</span>
-                      </div>
-                      <span className="text-sm font-mono text-foreground">{a.symbol}</span>
-                    </div>
+            {loadingStrategies || loadingState ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  Loading rebalance view...
+                </td>
+              </tr>
+            ) : allocationRows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  No allocation data available.
+                </td>
+              </tr>
+            ) : (
+              allocationRows.map((row) => (
+                <tr key={row.symbol} className="border-b border-border">
+                  <td className="py-3 px-4 text-left text-sm font-mono text-foreground">{row.symbol}</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{row.current.toFixed(2)}%</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{row.target.toFixed(2)}%</td>
+                  <td
+                    className={cn(
+                      "py-3 px-4 text-right text-sm font-mono",
+                      row.diff > 0 ? "text-positive" : row.diff < 0 ? "text-negative" : "text-muted-foreground"
+                    )}
+                  >
+                    {row.diff > 0 ? "+" : ""}
+                    {row.diff.toFixed(2)}%
                   </td>
-                  <td className="py-3 px-4 text-right font-mono text-sm text-foreground">{a.allocation}%</td>
-                  <td className="py-3 px-4 text-right font-mono text-sm text-foreground">{a.targetAllocation}%</td>
-                  <td className={cn("py-3 px-4 text-right font-mono text-sm", diff > 0 ? "text-positive" : diff < 0 ? "text-negative" : "text-muted-foreground")}>
-                    {diff > 0 ? "+" : ""}{diff.toFixed(1)}%
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <span className={cn(
-                      "text-[10px] font-mono px-2 py-1 rounded",
-                      diff > 0 ? "bg-positive/10 text-positive" : diff < 0 ? "bg-negative/10 text-negative" : "bg-secondary text-muted-foreground"
-                    )}>
-                      {diff > 0 ? "Buy" : diff < 0 ? "Sell" : "Hold"}
+                  <td className="py-3 px-4 text-right text-sm font-mono">
+                    <span
+                      className={cn(
+                        "px-2 py-1 rounded text-[10px]",
+                        row.diff > 0
+                          ? "bg-positive/10 text-positive"
+                          : row.diff < 0
+                            ? "bg-negative/10 text-negative"
+                            : "bg-secondary text-muted-foreground"
+                      )}
+                    >
+                      {row.diff > 0 ? "BUY" : row.diff < 0 ? "SELL" : "HOLD"}
                     </span>
                   </td>
                 </tr>
-              );
-            })}
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-3 justify-end">
-        <button className="px-6 py-2.5 rounded-md border border-border text-sm font-mono text-foreground hover:bg-secondary transition-colors">
-          Preview Rebalance
-        </button>
-        <button className="px-6 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-mono font-semibold hover:opacity-90 transition-opacity">
-          Execute Rebalance
-        </button>
+      <div className="rounded-lg border border-border bg-card overflow-hidden">
+        <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          Recommended Trades
+        </div>
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border">
+              {["Asset", "Side", "Current %", "Target %", "Notional", "Reason"].map((heading) => (
+                <th
+                  key={heading}
+                  className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
+                >
+                  {heading}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {executionPlan?.recommendedTrades?.length ? (
+              executionPlan.recommendedTrades.map((trade, index) => (
+                <tr key={`${trade.asset}-${trade.side}-${index}`} className="border-b border-border">
+                  <td className="py-3 px-4 text-left text-sm font-mono text-foreground">{trade.asset}</td>
+                  <td className={cn("py-3 px-4 text-right text-sm font-mono", trade.side === "BUY" ? "text-positive" : "text-negative")}>
+                    {trade.side}
+                  </td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{trade.currentPercent.toFixed(2)}%</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{trade.targetPercent.toFixed(2)}%</td>
+                  <td className="py-3 px-4 text-right text-sm font-mono text-foreground">{formatUsd(trade.amountNotional)}</td>
+                  <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{trade.reason}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                  No trades recommended for the latest evaluation.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">Warnings</div>
+        {warnings.length === 0 ? (
+          <div className="text-sm text-muted-foreground">No warnings for this strategy evaluation.</div>
+        ) : (
+          <ul className="space-y-2">
+            {warnings.map((warning) => (
+              <li key={warning} className="text-xs text-muted-foreground font-mono border border-border rounded px-3 py-2">
+                {warning}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-4 text-[11px] text-muted-foreground">
+          Last evaluation snapshot: {formatDateTime(state?.executionPlan.timestamp)}
+        </div>
       </div>
     </div>
   );

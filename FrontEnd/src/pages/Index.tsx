@@ -4,6 +4,8 @@ import { TopBar } from "@/components/TopBar";
 import { ComingSoonPage } from "@/components/ComingSoonPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
 import { TradingPage } from "@/pages/TradingPage";
+import { RebalancePage } from "@/pages/RebalancePage";
+import { AutomationPage } from "@/pages/AutomationPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { NicehashPage } from "@/pages/NicehashPage";
 
@@ -15,14 +17,6 @@ const inactivePageMeta: Record<string, { title: string; description: string }> =
   markets: {
     title: "Markets",
     description: "Expanded market scanner and discovery tools are coming soon.",
-  },
-  rebalance: {
-    title: "Rebalance",
-    description: "Automated rebalancing workflows are not active yet.",
-  },
-  automation: {
-    title: "Automation",
-    description: "Strategy automation and bot execution are coming soon.",
   },
   orders: {
     title: "Orders",
@@ -43,6 +37,10 @@ const Index = () => {
         return <PortfolioPage />;
       case "trading":
         return <TradingPage />;
+      case "rebalance":
+        return <RebalancePage />;
+      case "automation":
+        return <AutomationPage />;
       case "asic-miners":
         return <AsicMinersPage />;
       case "nicehash":
