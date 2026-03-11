@@ -145,6 +145,7 @@ const ACTION_TYPE_OPTIONS = [
 const RISK_OPTIONS = ["", "low", "medium", "high"];
 const TURNOVER_OPTIONS = ["", "low", "medium", "high"];
 const STABLE_EXPOSURE_OPTIONS = ["", "low", "medium", "high"];
+const SCHEDULE_PRESET_OPTIONS = ["30m", "1h", "4h", "1d"];
 const SCHEDULE_INTERVAL_PATTERN = /^\d+(m|h|d)$/;
 
 function newId(prefix: string): string {
@@ -177,6 +178,21 @@ function validateOptionalNumericField(
   }
 
   return undefined;
+}
+
+function parseStrategyIdCsv(value: string): string[] {
+  const normalized = value
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  return Array.from(new Set(normalized)).sort((left, right) => left.localeCompare(right));
+}
+
+function toStrategyIdCsv(ids: string[]): string {
+  return Array.from(new Set(ids.map((id) => id.trim().toLowerCase()).filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right))
+    .join(", ");
 }
 
 function validateDraft(draft: StrategyDraft): DraftValidationErrors {
@@ -271,10 +287,7 @@ function validateDraft(draft: StrategyDraft): DraftValidationErrors {
     errors.disabledAssetsCsv = `Invalid disabled asset: ${invalidDisabledAsset}`;
   }
 
-  const baseStrategies = draft.baseStrategiesCsv
-    .split(",")
-    .map((value) => value.trim().toLowerCase())
-    .filter(Boolean);
+  const baseStrategies = parseStrategyIdCsv(draft.baseStrategiesCsv);
   const invalidBaseStrategy = baseStrategies.find((value) => !/^[a-z0-9-]+$/.test(value));
   if (invalidBaseStrategy) {
     errors.composition.baseStrategiesCsv = `Invalid base strategy id: ${invalidBaseStrategy}`;
@@ -515,6 +528,14 @@ function formatUsdToken(value: number | undefined): string {
   })}`;
 }
 
+function formatAmountNumber(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function formatDuration(startedAt: string | undefined, completedAt: string | undefined): string {
   if (!startedAt || !completedAt) return "--";
 
@@ -751,14 +772,7 @@ function draftToPayload(draft: StrategyDraft, strategyId: string): unknown {
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean);
 
-  const baseStrategies = Array.from(
-    new Set(
-      draft.baseStrategiesCsv
-        .split(",")
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean)
-    )
-  );
+  const baseStrategies = parseStrategyIdCsv(draft.baseStrategiesCsv);
 
   const strategyWeights = draft.strategyWeightRows.reduce<Record<string, number>>((acc, row) => {
     const strategyRef = row.strategyId.trim().toLowerCase();
@@ -825,7 +839,25 @@ function toStrategyId(name: string): string {
   );
 }
 
+function pickModerateBaseStrategies(baseStrategyIds: string[]): string[] {
+  const preferred = [
+    "periodic-rebalancing",
+    "volatility-hedge",
+    "btc-dominance-rotation",
+    "mean-reversion",
+    "momentum-rotation",
+    "relative-strength-rotation",
+    "drawdown-protection",
+  ];
+
+  const chosen = preferred.filter((id) => baseStrategyIds.includes(id)).slice(0, 3);
+  if (chosen.length > 0) return chosen;
+  return baseStrategyIds.slice(0, 3);
+}
+
 function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
+  const moderateBaseStrategies = pickModerateBaseStrategies(baseStrategyIds);
+
   return {
     name: "",
     description: "",
@@ -833,7 +865,7 @@ function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
     scheduleInterval: "1h",
     isEnabled: false,
     compositionMode: "automatic",
-    baseStrategiesCsv: baseStrategyIds.join(", "),
+    baseStrategiesCsv: moderateBaseStrategies.join(", "),
     strategyWeightRows: [],
     autoStrategyUsage: true,
     selectionConfig: {
@@ -842,7 +874,7 @@ function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
       maxWeightShiftPerCycle: "",
       strategyCooldownHours: "",
       minActiveDurationHours: "",
-      fallbackStrategy: baseStrategyIds[0] ?? "",
+      fallbackStrategy: moderateBaseStrategies[0] ?? "",
     },
     weightAdjustment: {
       scorePower: "",
@@ -950,6 +982,42 @@ export function AutomationPage() {
     () => usableStrategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
     [selectedStrategyId, usableStrategies]
   );
+  const strategyNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    strategies.forEach((strategy) => {
+      map.set(strategy.id, strategy.name);
+    });
+    return map;
+  }, [strategies]);
+  const baseStrategyOptions = useMemo(
+    () =>
+      readOnlyStrategies
+        .map((strategy) => ({ id: strategy.id, name: strategy.name }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [readOnlyStrategies]
+  );
+  const selectedBaseStrategyIds = useMemo(
+    () => parseStrategyIdCsv(draft?.baseStrategiesCsv ?? ""),
+    [draft?.baseStrategiesCsv]
+  );
+  const selectedBaseStrategiesLabel = useMemo(() => {
+    if (selectedBaseStrategyIds.length === 0) return "Select base strategies";
+    if (selectedBaseStrategyIds.length === 1) {
+      return strategyNameById.get(selectedBaseStrategyIds[0]) ?? selectedBaseStrategyIds[0];
+    }
+
+    const first = strategyNameById.get(selectedBaseStrategyIds[0]) ?? selectedBaseStrategyIds[0];
+    return `${first} +${selectedBaseStrategyIds.length - 1}`;
+  }, [selectedBaseStrategyIds, strategyNameById]);
+  const strategyDropdownOptions = useMemo(() => {
+    const preferredIds = selectedBaseStrategyIds.length > 0 ? selectedBaseStrategyIds : baseStrategyOptions.map((item) => item.id);
+    const normalizedIds = Array.from(new Set(preferredIds)).sort((left, right) => left.localeCompare(right));
+
+    return normalizedIds.map((strategyId) => ({
+      id: strategyId,
+      name: strategyNameById.get(strategyId) ?? strategyId,
+    }));
+  }, [baseStrategyOptions, selectedBaseStrategyIds, strategyNameById]);
 
   useEffect(() => {
     if (!selectedStrategy) return;
@@ -1155,6 +1223,19 @@ export function AutomationPage() {
     }));
   };
 
+  const toggleBaseStrategySelection = (strategyId: string): void => {
+    updateDraft((previous) => {
+      const selected = parseStrategyIdCsv(previous.baseStrategiesCsv);
+      const exists = selected.includes(strategyId);
+      const next = exists ? selected.filter((item) => item !== strategyId) : [...selected, strategyId];
+
+      return {
+        ...previous,
+        baseStrategiesCsv: toStrategyIdCsv(next),
+      };
+    });
+  };
+
   const updateStrategyWeightRow = (rowId: string, patch: Partial<DraftStrategyWeightRow>): void => {
     updateDraft((previous) => ({
       ...previous,
@@ -1172,7 +1253,17 @@ export function AutomationPage() {
   const addStrategyWeightRow = (): void => {
     updateDraft((previous) => ({
       ...previous,
-      strategyWeightRows: [...previous.strategyWeightRows, { id: newId("strategy-weight"), strategyId: "", weight: "" }],
+      strategyWeightRows: [
+        ...previous.strategyWeightRows,
+        {
+          id: newId("strategy-weight"),
+          strategyId:
+            strategyDropdownOptions.find(
+              (option) => !previous.strategyWeightRows.some((row) => row.strategyId === option.id)
+            )?.id ?? "",
+          weight: "",
+        },
+      ],
     }));
   };
 
@@ -1369,20 +1460,16 @@ export function AutomationPage() {
 
       {accountType === "demo" ? (
         <div className="flex justify-center">
-          <div className="relative min-w-[280px] rounded-lg border border-border bg-card px-6 py-4 text-center">
+          <div className="relative px-6 py-1 text-center">
             <button
               onClick={() => setIsDemoBalanceModalOpen(true)}
-              className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground hover:text-foreground"
+              className="absolute -right-2 -top-1 inline-flex h-6 w-6 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground hover:text-foreground"
               aria-label="Edit demo balance"
               disabled={loadingDemoAccount}
             >
-              <Pencil size={14} />
+              <Pencil size={12} />
             </button>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Demo Balance</div>
-            <div className="mt-1 text-2xl font-mono font-semibold text-foreground">{formatUsdToken(demoBalanceCurrent)}</div>
-            <div className="mt-1 text-[11px] font-mono text-muted-foreground">
-              Dummy money (uses live market data)
-            </div>
+            <div className="text-lg font-mono text-muted-foreground">{formatAmountNumber(demoBalanceCurrent)}</div>
           </div>
         </div>
       ) : null}
@@ -1542,7 +1629,20 @@ export function AutomationPage() {
               </div>
               <div>
                 <label className="text-muted-foreground">Schedule Interval</label>
-                <input value={draft.scheduleInterval} onChange={(event) => updateDraft((prev) => ({ ...prev, scheduleInterval: event.target.value }))} className={editorFieldClass(Boolean(draftValidation?.scheduleInterval))} placeholder="15m" />
+                <select
+                  value={draft.scheduleInterval}
+                  onChange={(event) => updateDraft((prev) => ({ ...prev, scheduleInterval: event.target.value }))}
+                  className={editorFieldClass(Boolean(draftValidation?.scheduleInterval))}
+                >
+                  {!SCHEDULE_PRESET_OPTIONS.includes(draft.scheduleInterval) ? (
+                    <option value={draft.scheduleInterval}>{draft.scheduleInterval}</option>
+                  ) : null}
+                  {SCHEDULE_PRESET_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
                 {draftValidation?.scheduleInterval ? <div className={inlineErrorClass}>{draftValidation.scheduleInterval}</div> : null}
               </div>
               <div className="flex items-end">
@@ -1573,13 +1673,40 @@ export function AutomationPage() {
                   </select>
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-muted-foreground">Selected Base Strategies (comma separated ids)</label>
-                  <input
-                    value={draft.baseStrategiesCsv}
-                    onChange={(event) => updateDraft((prev) => ({ ...prev, baseStrategiesCsv: event.target.value }))}
-                    className={editorFieldClass(Boolean(draftValidation?.composition.baseStrategiesCsv))}
-                    placeholder="momentum-rotation, volatility-hedge"
-                  />
+                  <label className="text-muted-foreground">Selected Base Strategies</label>
+                  <details className="relative mt-1">
+                    <summary
+                      className={cn(
+                        "w-full rounded border bg-secondary px-2 py-2 text-foreground outline-none cursor-pointer list-none [&::-webkit-details-marker]:hidden",
+                        draftValidation?.composition.baseStrategiesCsv ? "border-negative" : "border-border"
+                      )}
+                    >
+                      {selectedBaseStrategiesLabel}
+                    </summary>
+                    <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded border border-border bg-card p-2">
+                      {baseStrategyOptions.length === 0 ? (
+                        <div className="text-xs font-mono text-muted-foreground">No base strategies available.</div>
+                      ) : (
+                        <div className="space-y-1">
+                          {baseStrategyOptions.map((option) => {
+                            const checked = selectedBaseStrategyIds.includes(option.id);
+                            return (
+                              <label key={option.id} className="flex items-center gap-2 rounded px-1 py-1 hover:bg-secondary/30">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleBaseStrategySelection(option.id)}
+                                  className="h-4 w-4"
+                                />
+                                <span className="text-xs font-mono text-foreground">{option.name}</span>
+                                <span className="text-[11px] font-mono text-muted-foreground">({option.id})</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </details>
                   {draftValidation?.composition.baseStrategiesCsv ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.baseStrategiesCsv}</div>
                   ) : null}
@@ -1620,11 +1747,18 @@ export function AutomationPage() {
                       >
                         <div className="col-span-6">
                           <label className="text-muted-foreground">Strategy ID</label>
-                          <input
+                          <select
                             value={row.strategyId}
                             onChange={(event) => updateStrategyWeightRow(row.id, { strategyId: event.target.value })}
                             className={editorFieldClass(Boolean(draftValidation?.strategyWeightRows[row.id]?.strategyId), true)}
-                          />
+                          >
+                            <option value="">Select strategy</option>
+                            {strategyDropdownOptions.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.name} ({option.id})
+                              </option>
+                            ))}
+                          </select>
                           {draftValidation?.strategyWeightRows[row.id]?.strategyId ? (
                             <div className={inlineErrorClass}>{draftValidation.strategyWeightRows[row.id]?.strategyId}</div>
                           ) : null}
@@ -1635,6 +1769,7 @@ export function AutomationPage() {
                             value={row.weight}
                             onChange={(event) => updateStrategyWeightRow(row.id, { weight: event.target.value })}
                             className={editorFieldClass(Boolean(draftValidation?.strategyWeightRows[row.id]?.weight), true)}
+                            placeholder="25"
                           />
                           {draftValidation?.strategyWeightRows[row.id]?.weight ? (
                             <div className={inlineErrorClass}>{draftValidation.strategyWeightRows[row.id]?.weight}</div>
@@ -1666,6 +1801,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.minStrategyScore))}
+                    placeholder="0.45"
                   />
                   {draftValidation?.composition.minStrategyScore ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.minStrategyScore}</div>
@@ -1682,6 +1818,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.maxActiveStrategies))}
+                    placeholder="3"
                   />
                   {draftValidation?.composition.maxActiveStrategies ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.maxActiveStrategies}</div>
@@ -1698,6 +1835,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.maxWeightShiftPerCycle))}
+                    placeholder="15"
                   />
                   {draftValidation?.composition.maxWeightShiftPerCycle ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.maxWeightShiftPerCycle}</div>
@@ -1714,6 +1852,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.strategyCooldownHours))}
+                    placeholder="6"
                   />
                   {draftValidation?.composition.strategyCooldownHours ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.strategyCooldownHours}</div>
@@ -1730,6 +1869,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.minActiveDurationHours))}
+                    placeholder="12"
                   />
                   {draftValidation?.composition.minActiveDurationHours ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.minActiveDurationHours}</div>
@@ -1737,7 +1877,7 @@ export function AutomationPage() {
                 </div>
                 <div>
                   <label className="text-muted-foreground">Fallback Strategy</label>
-                  <input
+                  <select
                     value={draft.selectionConfig.fallbackStrategy}
                     onChange={(event) =>
                       updateDraft((prev) => ({
@@ -1746,7 +1886,21 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.fallbackStrategy))}
-                  />
+                  >
+                    <option value="">Auto (top score)</option>
+                    {draft.selectionConfig.fallbackStrategy &&
+                    !strategyDropdownOptions.some((option) => option.id === draft.selectionConfig.fallbackStrategy) ? (
+                      <option value={draft.selectionConfig.fallbackStrategy}>
+                        {strategyNameById.get(draft.selectionConfig.fallbackStrategy) ??
+                          draft.selectionConfig.fallbackStrategy}
+                      </option>
+                    ) : null}
+                    {strategyDropdownOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name} ({option.id})
+                      </option>
+                    ))}
+                  </select>
                   {draftValidation?.composition.fallbackStrategy ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.fallbackStrategy}</div>
                   ) : null}
@@ -1765,6 +1919,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.scorePower))}
+                    placeholder="1"
                   />
                   {draftValidation?.composition.scorePower ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.scorePower}</div>
@@ -1781,6 +1936,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.minWeightPctPerStrategy))}
+                    placeholder="10"
                   />
                   {draftValidation?.composition.minWeightPctPerStrategy ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.minWeightPctPerStrategy}</div>
@@ -1797,6 +1953,7 @@ export function AutomationPage() {
                       }))
                     }
                     className={editorFieldClass(Boolean(draftValidation?.composition.maxWeightPctPerStrategy))}
+                    placeholder="60"
                   />
                   {draftValidation?.composition.maxWeightPctPerStrategy ? (
                     <div className={inlineErrorClass}>{draftValidation.composition.maxWeightPctPerStrategy}</div>
@@ -1833,6 +1990,7 @@ export function AutomationPage() {
                   value={draft.guards.maxSingleAssetPct}
                   onChange={(event) => updateDraft((prev) => ({ ...prev, guards: { ...prev.guards, maxSingleAssetPct: event.target.value } }))}
                   className={editorFieldClass(Boolean(draftValidation?.guards.maxSingleAssetPct))}
+                  placeholder="55"
                 />
                 {draftValidation?.guards.maxSingleAssetPct ? <div className={inlineErrorClass}>{draftValidation.guards.maxSingleAssetPct}</div> : null}
               </div>
@@ -1842,6 +2000,7 @@ export function AutomationPage() {
                   value={draft.guards.minStablecoinPct}
                   onChange={(event) => updateDraft((prev) => ({ ...prev, guards: { ...prev.guards, minStablecoinPct: event.target.value } }))}
                   className={editorFieldClass(Boolean(draftValidation?.guards.minStablecoinPct))}
+                  placeholder="12"
                 />
                 {draftValidation?.guards.minStablecoinPct ? <div className={inlineErrorClass}>{draftValidation.guards.minStablecoinPct}</div> : null}
               </div>
@@ -1851,6 +2010,7 @@ export function AutomationPage() {
                   value={draft.guards.maxTradesPerCycle}
                   onChange={(event) => updateDraft((prev) => ({ ...prev, guards: { ...prev.guards, maxTradesPerCycle: event.target.value } }))}
                   className={editorFieldClass(Boolean(draftValidation?.guards.maxTradesPerCycle))}
+                  placeholder="6"
                 />
                 {draftValidation?.guards.maxTradesPerCycle ? <div className={inlineErrorClass}>{draftValidation.guards.maxTradesPerCycle}</div> : null}
               </div>
@@ -1860,6 +2020,7 @@ export function AutomationPage() {
                   value={draft.guards.minTradeNotional}
                   onChange={(event) => updateDraft((prev) => ({ ...prev, guards: { ...prev.guards, minTradeNotional: event.target.value } }))}
                   className={editorFieldClass(Boolean(draftValidation?.guards.minTradeNotional))}
+                  placeholder="25"
                 />
                 {draftValidation?.guards.minTradeNotional ? <div className={inlineErrorClass}>{draftValidation.guards.minTradeNotional}</div> : null}
               </div>
@@ -1869,6 +2030,7 @@ export function AutomationPage() {
                   value={draft.guards.cashReservePct}
                   onChange={(event) => updateDraft((prev) => ({ ...prev, guards: { ...prev.guards, cashReservePct: event.target.value } }))}
                   className={editorFieldClass(Boolean(draftValidation?.guards.cashReservePct))}
+                  placeholder="8"
                 />
                 {draftValidation?.guards.cashReservePct ? <div className={inlineErrorClass}>{draftValidation.guards.cashReservePct}</div> : null}
               </div>
