@@ -30,6 +30,14 @@ export class StrategyRunner {
     return demoSettings.balance;
   }
 
+  private async buildStrategyUniverse(): Promise<Record<string, StrategyConfig>> {
+    const strategies = await this.repository.listStrategies();
+    return strategies.reduce<Record<string, StrategyConfig>>((acc, strategy) => {
+      acc[strategy.id] = strategy;
+      return acc;
+    }, {});
+  }
+
   async evaluateStrategyState(
     strategyId: string,
     accountType?: PortfolioAccountType
@@ -53,12 +61,14 @@ export class StrategyRunner {
     const demoBalance = await this.resolveDemoBalance(accountType);
     const portfolio = await getPortfolioState(accountType, "USDC", { demoCapital: demoBalance });
     const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
+    const strategyUniverse = await this.buildStrategyUniverse();
 
     const evaluation = this.engine.evaluate({
       strategy,
       portfolio,
       marketSignals,
       accountType,
+      strategyUniverse,
     });
 
     return {
@@ -116,6 +126,7 @@ export class StrategyRunner {
       const demoBalance = await this.resolveDemoBalance(accountType);
       const portfolio = await getPortfolioState(accountType, "USDC", { demoCapital: demoBalance });
       const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
+      const strategyUniverse = await this.buildStrategyUniverse();
 
       run = (await this.repository.updateStrategyRun(run.id, {
         inputSnapshot: {
@@ -129,6 +140,7 @@ export class StrategyRunner {
         portfolio,
         marketSignals,
         accountType,
+        strategyUniverse,
       });
 
       await this.repository.saveExecutionPlan(evaluation.executionPlan);

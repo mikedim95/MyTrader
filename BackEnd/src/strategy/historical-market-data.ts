@@ -89,14 +89,43 @@ function buildSignals(
       volume_change: round(volumeChange, 6),
       asset_trend: round(Math.sign(priceChange), 4),
       volume_24h: volumes[symbol],
+      drawdown_pct: round(Math.max(0, -priceChange), 6),
     };
   });
 
   const nonStable = symbols.filter((symbol) => symbol !== "USDC" && symbol !== "USDT");
+  const rankedByReturn = [...nonStable].sort((left, right) => {
+    const leftReturn = assetIndicators[left]?.price_change_24h ?? 0;
+    const rightReturn = assetIndicators[right]?.price_change_24h ?? 0;
+    if (rightReturn !== leftReturn) return rightReturn - leftReturn;
+    return left.localeCompare(right);
+  });
+  const rankDenominator = Math.max(1, rankedByReturn.length - 1);
+  rankedByReturn.forEach((symbol, index) => {
+    const score = rankedByReturn.length <= 1 ? 1 : (rankDenominator - index) / rankDenominator;
+    assetIndicators[symbol] = {
+      ...assetIndicators[symbol],
+      relative_strength: round(score, 6),
+    };
+  });
+
+  symbols
+    .filter((symbol) => symbol === "USDC" || symbol === "USDT")
+    .forEach((symbol) => {
+      assetIndicators[symbol] = {
+        ...assetIndicators[symbol],
+        relative_strength: 0.5,
+      };
+    });
+
   const averageAbsReturn =
     nonStable.length === 0
       ? 0
       : nonStable.reduce((sum, symbol) => sum + Math.abs(assetIndicators[symbol].price_change_24h ?? 0), 0) / nonStable.length;
+  const drawdownPct =
+    nonStable.length === 0
+      ? 0
+      : nonStable.reduce((sum, symbol) => sum + (assetIndicators[symbol].drawdown_pct ?? 0), 0) / nonStable.length;
 
   const btcPrice = prices.BTC ?? 1;
   const altBasket = symbols
@@ -114,6 +143,7 @@ function buildSignals(
       volatility: round(averageAbsReturn, 6),
       btc_dominance: round(btcDominance, 6),
       market_direction: round(Math.sign(marketDirection), 2),
+      drawdown_pct: round(drawdownPct, 6),
       progress_ratio: round(stepIndex / Math.max(1, totalSteps - 1), 6),
     },
     assetIndicators,

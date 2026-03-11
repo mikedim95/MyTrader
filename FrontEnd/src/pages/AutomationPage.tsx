@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { backendApi } from "@/lib/api";
 import { useBacktests, useDemoAccountSettings, useStrategies, useStrategyRunDetails, useStrategyRuns } from "@/hooks/useTradingData";
-import type { BacktestCreateRequest, PortfolioAccountType, StrategyConfig, StrategyMode } from "@/types/api";
+import type {
+  BacktestCreateRequest,
+  PortfolioAccountType,
+  StrategyCompositionMode,
+  StrategyConfig,
+  StrategyMode,
+} from "@/types/api";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { cn } from "@/lib/utils";
 
@@ -28,12 +34,35 @@ interface DraftRule {
   actionTo: string;
 }
 
+interface DraftStrategyWeightRow {
+  id: string;
+  strategyId: string;
+  weight: string;
+}
+
 interface StrategyDraft {
   name: string;
   description: string;
   executionMode: StrategyMode;
   scheduleInterval: string;
   isEnabled: boolean;
+  compositionMode: StrategyCompositionMode;
+  baseStrategiesCsv: string;
+  strategyWeightRows: DraftStrategyWeightRow[];
+  autoStrategyUsage: boolean;
+  selectionConfig: {
+    minStrategyScore: string;
+    maxActiveStrategies: string;
+    maxWeightShiftPerCycle: string;
+    strategyCooldownHours: string;
+    minActiveDurationHours: string;
+    fallbackStrategy: string;
+  };
+  weightAdjustment: {
+    scorePower: string;
+    minWeightPctPerStrategy: string;
+    maxWeightPctPerStrategy: string;
+  };
   metadataRiskLevel: string;
   metadataExpectedTurnover: string;
   metadataStablecoinExposure: string;
@@ -61,17 +90,37 @@ interface DraftRuleErrors {
   actionTo?: string;
 }
 
+interface DraftWeightRowErrors {
+  strategyId?: string;
+  weight?: string;
+}
+
 interface DraftValidationErrors {
   name?: string;
   scheduleInterval?: string;
   disabledAssetsCsv?: string;
   baseAllocation?: string;
+  composition: {
+    baseStrategiesCsv?: string;
+    minStrategyScore?: string;
+    maxActiveStrategies?: string;
+    maxWeightShiftPerCycle?: string;
+    strategyCooldownHours?: string;
+    minActiveDurationHours?: string;
+    fallbackStrategy?: string;
+    scorePower?: string;
+    minWeightPctPerStrategy?: string;
+    maxWeightPctPerStrategy?: string;
+    strategyWeightRows?: string;
+  };
   guards: Partial<Record<GuardField, string>>;
   baseAllocationRows: Record<string, { symbol?: string; percent?: string }>;
+  strategyWeightRows: Record<string, DraftWeightRowErrors>;
   rules: Record<string, DraftRuleErrors>;
 }
 
 const MODE_OPTIONS: StrategyMode[] = ["manual", "semi_auto", "auto"];
+const COMPOSITION_MODE_OPTIONS: StrategyCompositionMode[] = ["manual", "automatic"];
 const INDICATOR_OPTIONS = [
   "volatility",
   "btc_dominance",
@@ -81,6 +130,8 @@ const INDICATOR_OPTIONS = [
   "price_change_24h",
   "volume_change",
   "market_direction",
+  "relative_strength",
+  "drawdown_pct",
 ];
 const OPERATOR_OPTIONS = [">", "<", ">=", "<=", "==", "!="];
 const ACTION_TYPE_OPTIONS = [
@@ -129,8 +180,10 @@ function validateOptionalNumericField(
 
 function validateDraft(draft: StrategyDraft): DraftValidationErrors {
   const errors: DraftValidationErrors = {
+    composition: {},
     guards: {},
     baseAllocationRows: {},
+    strategyWeightRows: {},
     rules: {},
   };
 
@@ -217,6 +270,113 @@ function validateDraft(draft: StrategyDraft): DraftValidationErrors {
     errors.disabledAssetsCsv = `Invalid disabled asset: ${invalidDisabledAsset}`;
   }
 
+  const baseStrategies = draft.baseStrategiesCsv
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  const invalidBaseStrategy = baseStrategies.find((value) => !/^[a-z0-9-]+$/.test(value));
+  if (invalidBaseStrategy) {
+    errors.composition.baseStrategiesCsv = `Invalid base strategy id: ${invalidBaseStrategy}`;
+  }
+
+  if ((draft.compositionMode === "automatic" || draft.autoStrategyUsage || baseStrategies.length > 0) && baseStrategies.length === 0) {
+    errors.composition.baseStrategiesCsv = "Select at least one base strategy for composition.";
+  }
+
+  errors.composition.minStrategyScore = validateOptionalNumericField(
+    draft.selectionConfig.minStrategyScore,
+    "Min strategy score",
+    { min: 0, max: 1 }
+  );
+  errors.composition.maxActiveStrategies = validateOptionalNumericField(
+    draft.selectionConfig.maxActiveStrategies,
+    "Max active strategies",
+    { integer: true, min: 1, max: 20 }
+  );
+  errors.composition.maxWeightShiftPerCycle = validateOptionalNumericField(
+    draft.selectionConfig.maxWeightShiftPerCycle,
+    "Max weight shift per cycle",
+    { min: 0, max: 100 }
+  );
+  errors.composition.strategyCooldownHours = validateOptionalNumericField(
+    draft.selectionConfig.strategyCooldownHours,
+    "Strategy cooldown hours",
+    { integer: true, min: 0, max: 720 }
+  );
+  errors.composition.minActiveDurationHours = validateOptionalNumericField(
+    draft.selectionConfig.minActiveDurationHours,
+    "Min active duration hours",
+    { integer: true, min: 0, max: 720 }
+  );
+  errors.composition.scorePower = validateOptionalNumericField(draft.weightAdjustment.scorePower, "Score power", {
+    min: 0.1,
+    max: 5,
+  });
+  errors.composition.minWeightPctPerStrategy = validateOptionalNumericField(
+    draft.weightAdjustment.minWeightPctPerStrategy,
+    "Min weight %",
+    { min: 0, max: 100 }
+  );
+  errors.composition.maxWeightPctPerStrategy = validateOptionalNumericField(
+    draft.weightAdjustment.maxWeightPctPerStrategy,
+    "Max weight %",
+    { min: 0, max: 100 }
+  );
+
+  const minWeight = draft.weightAdjustment.minWeightPctPerStrategy.trim()
+    ? Number(draft.weightAdjustment.minWeightPctPerStrategy)
+    : undefined;
+  const maxWeight = draft.weightAdjustment.maxWeightPctPerStrategy.trim()
+    ? Number(draft.weightAdjustment.maxWeightPctPerStrategy)
+    : undefined;
+  if (typeof minWeight === "number" && typeof maxWeight === "number" && Number.isFinite(minWeight) && Number.isFinite(maxWeight) && minWeight > maxWeight) {
+    errors.composition.maxWeightPctPerStrategy = "Max weight % must be >= Min weight %.";
+  }
+
+  if (draft.selectionConfig.fallbackStrategy.trim() && !/^[a-z0-9-]+$/i.test(draft.selectionConfig.fallbackStrategy.trim())) {
+    errors.composition.fallbackStrategy = "Fallback strategy must use letters, numbers, and hyphens.";
+  }
+
+  const seenWeightStrategies = new Set<string>();
+  draft.strategyWeightRows.forEach((row) => {
+    const rowErrors: DraftWeightRowErrors = {};
+    const strategyId = row.strategyId.trim().toLowerCase();
+    const weight = row.weight.trim();
+
+    if (strategyId) {
+      if (!/^[a-z0-9-]+$/.test(strategyId)) {
+        rowErrors.strategyId = "Use lowercase letters, numbers, and hyphens.";
+      } else if (seenWeightStrategies.has(strategyId)) {
+        rowErrors.strategyId = "Strategy weight row must be unique.";
+      } else {
+        seenWeightStrategies.add(strategyId);
+      }
+    }
+
+    if (weight && !strategyId) {
+      rowErrors.strategyId = "Strategy id is required when weight is set.";
+    }
+
+    if (strategyId && !weight) {
+      rowErrors.weight = "Weight is required when strategy id is set.";
+    } else if (weight) {
+      const parsedWeight = Number(weight);
+      if (!Number.isFinite(parsedWeight)) {
+        rowErrors.weight = "Weight must be numeric.";
+      } else if (parsedWeight < 0) {
+        rowErrors.weight = "Weight cannot be negative.";
+      }
+    }
+
+    if (rowErrors.strategyId || rowErrors.weight) {
+      errors.strategyWeightRows[row.id] = rowErrors;
+    }
+  });
+
+  if (draft.compositionMode === "manual" && baseStrategies.length > 0 && draft.strategyWeightRows.length === 0) {
+    errors.composition.strategyWeightRows = "Add strategy weights for manual composition mode.";
+  }
+
   const seenRuleIds = new Set<string>();
   draft.rules.forEach((rule, index) => {
     const ruleErrors: DraftRuleErrors = {};
@@ -281,11 +441,19 @@ function hasDraftValidationErrors(errors: DraftValidationErrors): boolean {
     return true;
   }
 
+  if (Object.values(errors.composition).some(Boolean)) {
+    return true;
+  }
+
   if (Object.values(errors.guards).some(Boolean)) {
     return true;
   }
 
   if (Object.values(errors.baseAllocationRows).some((rowErrors) => rowErrors.symbol || rowErrors.percent)) {
+    return true;
+  }
+
+  if (Object.values(errors.strategyWeightRows).some((rowErrors) => rowErrors.strategyId || rowErrors.weight)) {
     return true;
   }
 
@@ -301,6 +469,8 @@ function firstDraftValidationError(errors: DraftValidationErrors): string | unde
   if (errors.scheduleInterval) return errors.scheduleInterval;
   if (errors.baseAllocation) return errors.baseAllocation;
   if (errors.disabledAssetsCsv) return errors.disabledAssetsCsv;
+  const firstCompositionError = Object.values(errors.composition).find(Boolean);
+  if (firstCompositionError) return firstCompositionError;
 
   const firstGuardError = Object.values(errors.guards).find(Boolean);
   if (firstGuardError) return firstGuardError;
@@ -308,6 +478,11 @@ function firstDraftValidationError(errors: DraftValidationErrors): string | unde
   for (const rowError of Object.values(errors.baseAllocationRows)) {
     if (rowError.symbol) return rowError.symbol;
     if (rowError.percent) return rowError.percent;
+  }
+
+  for (const rowError of Object.values(errors.strategyWeightRows)) {
+    if (rowError.strategyId) return rowError.strategyId;
+    if (rowError.weight) return rowError.weight;
   }
 
   for (const ruleError of Object.values(errors.rules)) {
@@ -398,6 +573,13 @@ function strategyToDraft(strategy: StrategyConfig): StrategyDraft {
     actionFrom: rule.action.from ?? "",
     actionTo: rule.action.to ?? "",
   }));
+  const strategyWeightRows = Object.entries(strategy.strategyWeights ?? {})
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([strategyId, weight]) => ({
+      id: newId("strategy-weight"),
+      strategyId,
+      weight: String(weight),
+    }));
 
   return {
     name: strategy.name,
@@ -405,6 +587,47 @@ function strategyToDraft(strategy: StrategyConfig): StrategyDraft {
     executionMode: strategy.executionMode,
     scheduleInterval: strategy.scheduleInterval,
     isEnabled: strategy.isEnabled,
+    compositionMode: strategy.compositionMode ?? "manual",
+    baseStrategiesCsv: (strategy.baseStrategies ?? []).join(", "),
+    strategyWeightRows,
+    autoStrategyUsage: Boolean(strategy.autoStrategyUsage),
+    selectionConfig: {
+      minStrategyScore:
+        typeof strategy.strategySelectionConfig?.minStrategyScore === "number"
+          ? String(strategy.strategySelectionConfig.minStrategyScore)
+          : "",
+      maxActiveStrategies:
+        typeof strategy.strategySelectionConfig?.maxActiveStrategies === "number"
+          ? String(strategy.strategySelectionConfig.maxActiveStrategies)
+          : "",
+      maxWeightShiftPerCycle:
+        typeof strategy.strategySelectionConfig?.maxWeightShiftPerCycle === "number"
+          ? String(strategy.strategySelectionConfig.maxWeightShiftPerCycle)
+          : "",
+      strategyCooldownHours:
+        typeof strategy.strategySelectionConfig?.strategyCooldownHours === "number"
+          ? String(strategy.strategySelectionConfig.strategyCooldownHours)
+          : "",
+      minActiveDurationHours:
+        typeof strategy.strategySelectionConfig?.minActiveDurationHours === "number"
+          ? String(strategy.strategySelectionConfig.minActiveDurationHours)
+          : "",
+      fallbackStrategy: strategy.strategySelectionConfig?.fallbackStrategy ?? "",
+    },
+    weightAdjustment: {
+      scorePower:
+        typeof strategy.weightAdjustmentConfig?.scorePower === "number"
+          ? String(strategy.weightAdjustmentConfig.scorePower)
+          : "",
+      minWeightPctPerStrategy:
+        typeof strategy.weightAdjustmentConfig?.minWeightPctPerStrategy === "number"
+          ? String(strategy.weightAdjustmentConfig.minWeightPctPerStrategy)
+          : "",
+      maxWeightPctPerStrategy:
+        typeof strategy.weightAdjustmentConfig?.maxWeightPctPerStrategy === "number"
+          ? String(strategy.weightAdjustmentConfig.maxWeightPctPerStrategy)
+          : "",
+    },
     metadataRiskLevel: strategy.metadata?.riskLevel ?? "",
     metadataExpectedTurnover: strategy.metadata?.expectedTurnover ?? "",
     metadataStablecoinExposure: strategy.metadata?.stablecoinExposure ?? "",
@@ -519,6 +742,26 @@ function draftToPayload(draft: StrategyDraft, strategyId: string): unknown {
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean);
 
+  const baseStrategies = Array.from(
+    new Set(
+      draft.baseStrategiesCsv
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+
+  const strategyWeights = draft.strategyWeightRows.reduce<Record<string, number>>((acc, row) => {
+    const strategyRef = row.strategyId.trim().toLowerCase();
+    if (!strategyRef) return acc;
+    const weight = Number(row.weight);
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`Strategy weight for ${strategyRef} must be a non-negative number.`);
+    }
+    acc[strategyRef] = weight;
+    return acc;
+  }, {});
+
   return {
     id: strategyId,
     name: draft.name.trim(),
@@ -537,6 +780,29 @@ function draftToPayload(draft: StrategyDraft, strategyId: string): unknown {
     isEnabled: draft.isEnabled,
     scheduleInterval: draft.scheduleInterval.trim().toLowerCase(),
     disabledAssets,
+    compositionMode: draft.compositionMode,
+    baseStrategies,
+    strategyWeights,
+    autoStrategyUsage: draft.autoStrategyUsage,
+    strategySelectionConfig: {
+      minStrategyScore: toOptionalNumber(draft.selectionConfig.minStrategyScore, "minStrategyScore"),
+      maxActiveStrategies: toOptionalInteger(draft.selectionConfig.maxActiveStrategies, "maxActiveStrategies"),
+      maxWeightShiftPerCycle: toOptionalNumber(draft.selectionConfig.maxWeightShiftPerCycle, "maxWeightShiftPerCycle"),
+      strategyCooldownHours: toOptionalInteger(draft.selectionConfig.strategyCooldownHours, "strategyCooldownHours"),
+      minActiveDurationHours: toOptionalInteger(draft.selectionConfig.minActiveDurationHours, "minActiveDurationHours"),
+      fallbackStrategy: draft.selectionConfig.fallbackStrategy.trim().toLowerCase() || undefined,
+    },
+    weightAdjustmentConfig: {
+      scorePower: toOptionalNumber(draft.weightAdjustment.scorePower, "scorePower"),
+      minWeightPctPerStrategy: toOptionalNumber(
+        draft.weightAdjustment.minWeightPctPerStrategy,
+        "minWeightPctPerStrategy"
+      ),
+      maxWeightPctPerStrategy: toOptionalNumber(
+        draft.weightAdjustment.maxWeightPctPerStrategy,
+        "maxWeightPctPerStrategy"
+      ),
+    },
   };
 }
 
@@ -544,6 +810,7 @@ export function AutomationPage() {
   const queryClient = useQueryClient();
   const [accountType, setAccountType] = useState<PortfolioAccountType>("real");
   const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
+  const [isRunDetailsModalOpen, setIsRunDetailsModalOpen] = useState(false);
 
   const { data: strategyData, isPending: loadingStrategies, error: strategyError } = useStrategies();
   const { data: demoAccountData, isPending: loadingDemoAccount } = useDemoAccountSettings();
@@ -616,7 +883,9 @@ export function AutomationPage() {
     setDraftDirty(false);
   }, [draftDirty, draftStrategyId, selectedStrategy]);
 
-  const { data: runDetailsData, isPending: loadingRunDetails } = useStrategyRunDetails(selectedRunId || undefined);
+  const { data: runDetailsData, isPending: loadingRunDetails } = useStrategyRunDetails(
+    isRunDetailsModalOpen ? selectedRunId || undefined : undefined
+  );
   const selectedRun = runDetailsData?.run ?? runs.find((run) => run.id === selectedRunId) ?? null;
   const selectedRunExecutionPlan = runDetailsData?.executionPlan ?? null;
   const selectedStrategyLastRunAt = useMemo(
@@ -766,6 +1035,27 @@ export function AutomationPage() {
     }));
   };
 
+  const updateStrategyWeightRow = (rowId: string, patch: Partial<DraftStrategyWeightRow>): void => {
+    updateDraft((previous) => ({
+      ...previous,
+      strategyWeightRows: previous.strategyWeightRows.map((row) => (row.id === rowId ? { ...row, ...patch } : row)),
+    }));
+  };
+
+  const removeStrategyWeightRow = (rowId: string): void => {
+    updateDraft((previous) => ({
+      ...previous,
+      strategyWeightRows: previous.strategyWeightRows.filter((row) => row.id !== rowId),
+    }));
+  };
+
+  const addStrategyWeightRow = (): void => {
+    updateDraft((previous) => ({
+      ...previous,
+      strategyWeightRows: [...previous.strategyWeightRows, { id: newId("strategy-weight"), strategyId: "", weight: "" }],
+    }));
+  };
+
   const updateRule = (ruleId: string, patch: Partial<DraftRule>): void => {
     updateDraft((previous) => ({
       ...previous,
@@ -874,6 +1164,15 @@ export function AutomationPage() {
 
   const closeStrategyEditor = (): void => {
     setIsEditorModalOpen(false);
+  };
+
+  const openRunDetails = (runId: string): void => {
+    setSelectedRunId(runId);
+    setIsRunDetailsModalOpen(true);
+  };
+
+  const closeRunDetails = (): void => {
+    setIsRunDetailsModalOpen(false);
   };
 
   const runIndicators = selectedRun?.inputSnapshot?.marketSignals.indicators ?? {};
@@ -1104,6 +1403,258 @@ export function AutomationPage() {
               </div>
             </div>
 
+            <div className="rounded border border-border bg-secondary/20 p-3 space-y-3">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Composition</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
+                <div>
+                  <label className="text-muted-foreground">Composition Mode</label>
+                  <select
+                    value={draft.compositionMode}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({ ...prev, compositionMode: event.target.value as StrategyCompositionMode }))
+                    }
+                    className={editorFieldClass(false)}
+                  >
+                    {COMPOSITION_MODE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-muted-foreground">Selected Base Strategies (comma separated ids)</label>
+                  <input
+                    value={draft.baseStrategiesCsv}
+                    onChange={(event) => updateDraft((prev) => ({ ...prev, baseStrategiesCsv: event.target.value }))}
+                    className={editorFieldClass(Boolean(draftValidation?.composition.baseStrategiesCsv))}
+                    placeholder="momentum-rotation, volatility-hedge"
+                  />
+                  {draftValidation?.composition.baseStrategiesCsv ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.baseStrategiesCsv}</div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs font-mono text-foreground">
+                <input
+                  type="checkbox"
+                  checked={draft.autoStrategyUsage}
+                  onChange={(event) => updateDraft((prev) => ({ ...prev, autoStrategyUsage: event.target.checked }))}
+                  className="h-4 w-4"
+                />
+                Auto Strategy Usage
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Weights</div>
+                  <button
+                    onClick={addStrategyWeightRow}
+                    className="px-2 py-1 rounded border border-border text-xs font-mono text-foreground hover:bg-secondary"
+                  >
+                    Add Row
+                  </button>
+                </div>
+                {draftValidation?.composition.strategyWeightRows ? (
+                  <div className={inlineErrorClass}>{draftValidation.composition.strategyWeightRows}</div>
+                ) : null}
+                {draft.strategyWeightRows.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">No strategy weights defined.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {draft.strategyWeightRows.map((row) => (
+                      <div
+                        key={row.id}
+                        className="rounded border border-border bg-secondary/30 p-2 grid grid-cols-12 gap-2 items-end text-xs font-mono"
+                      >
+                        <div className="col-span-6">
+                          <label className="text-muted-foreground">Strategy ID</label>
+                          <input
+                            value={row.strategyId}
+                            onChange={(event) => updateStrategyWeightRow(row.id, { strategyId: event.target.value })}
+                            className={editorFieldClass(Boolean(draftValidation?.strategyWeightRows[row.id]?.strategyId), true)}
+                          />
+                          {draftValidation?.strategyWeightRows[row.id]?.strategyId ? (
+                            <div className={inlineErrorClass}>{draftValidation.strategyWeightRows[row.id]?.strategyId}</div>
+                          ) : null}
+                        </div>
+                        <div className="col-span-4">
+                          <label className="text-muted-foreground">Weight</label>
+                          <input
+                            value={row.weight}
+                            onChange={(event) => updateStrategyWeightRow(row.id, { weight: event.target.value })}
+                            className={editorFieldClass(Boolean(draftValidation?.strategyWeightRows[row.id]?.weight), true)}
+                          />
+                          {draftValidation?.strategyWeightRows[row.id]?.weight ? (
+                            <div className={inlineErrorClass}>{draftValidation.strategyWeightRows[row.id]?.weight}</div>
+                          ) : null}
+                        </div>
+                        <div className="col-span-2">
+                          <button
+                            onClick={() => removeStrategyWeightRow(row.id)}
+                            className="w-full px-2 py-1.5 rounded border border-border text-xs font-mono text-foreground hover:bg-secondary"
+                          >
+                            Del
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-mono">
+                <div>
+                  <label className="text-muted-foreground">Min Strategy Score</label>
+                  <input
+                    value={draft.selectionConfig.minStrategyScore}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, minStrategyScore: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.minStrategyScore))}
+                  />
+                  {draftValidation?.composition.minStrategyScore ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.minStrategyScore}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Max Active Strategies</label>
+                  <input
+                    value={draft.selectionConfig.maxActiveStrategies}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, maxActiveStrategies: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.maxActiveStrategies))}
+                  />
+                  {draftValidation?.composition.maxActiveStrategies ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.maxActiveStrategies}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Max Weight Shift / Cycle</label>
+                  <input
+                    value={draft.selectionConfig.maxWeightShiftPerCycle}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, maxWeightShiftPerCycle: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.maxWeightShiftPerCycle))}
+                  />
+                  {draftValidation?.composition.maxWeightShiftPerCycle ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.maxWeightShiftPerCycle}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Strategy Cooldown (hours)</label>
+                  <input
+                    value={draft.selectionConfig.strategyCooldownHours}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, strategyCooldownHours: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.strategyCooldownHours))}
+                  />
+                  {draftValidation?.composition.strategyCooldownHours ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.strategyCooldownHours}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Min Active Duration (hours)</label>
+                  <input
+                    value={draft.selectionConfig.minActiveDurationHours}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, minActiveDurationHours: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.minActiveDurationHours))}
+                  />
+                  {draftValidation?.composition.minActiveDurationHours ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.minActiveDurationHours}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Fallback Strategy</label>
+                  <input
+                    value={draft.selectionConfig.fallbackStrategy}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        selectionConfig: { ...prev.selectionConfig, fallbackStrategy: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.fallbackStrategy))}
+                  />
+                  {draftValidation?.composition.fallbackStrategy ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.fallbackStrategy}</div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs font-mono">
+                <div>
+                  <label className="text-muted-foreground">Score Power</label>
+                  <input
+                    value={draft.weightAdjustment.scorePower}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        weightAdjustment: { ...prev.weightAdjustment, scorePower: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.scorePower))}
+                  />
+                  {draftValidation?.composition.scorePower ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.scorePower}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Min Weight % / Strategy</label>
+                  <input
+                    value={draft.weightAdjustment.minWeightPctPerStrategy}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        weightAdjustment: { ...prev.weightAdjustment, minWeightPctPerStrategy: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.minWeightPctPerStrategy))}
+                  />
+                  {draftValidation?.composition.minWeightPctPerStrategy ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.minWeightPctPerStrategy}</div>
+                  ) : null}
+                </div>
+                <div>
+                  <label className="text-muted-foreground">Max Weight % / Strategy</label>
+                  <input
+                    value={draft.weightAdjustment.maxWeightPctPerStrategy}
+                    onChange={(event) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        weightAdjustment: { ...prev.weightAdjustment, maxWeightPctPerStrategy: event.target.value },
+                      }))
+                    }
+                    className={editorFieldClass(Boolean(draftValidation?.composition.maxWeightPctPerStrategy))}
+                  />
+                  {draftValidation?.composition.maxWeightPctPerStrategy ? (
+                    <div className={inlineErrorClass}>{draftValidation.composition.maxWeightPctPerStrategy}</div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
               <div>
                 <label className="text-muted-foreground">Risk Level</label>
@@ -1298,45 +1849,18 @@ export function AutomationPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Runs</div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                {["Started", "Strategy", "Account", "Status", "Trigger", "Completed", "Duration", "Warn"].map((heading) => (
-                  <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loadingRuns ? (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading runs...</td></tr>
-              ) : runs.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-6 text-center text-sm text-muted-foreground">No runs yet.</td></tr>
-              ) : (
-                runs.slice(0, 12).map((run) => (
-                  <tr
-                    key={run.id}
-                    className={cn("border-b border-border cursor-pointer", run.id === selectedRunId ? "bg-secondary/40" : "hover:bg-secondary/20")}
-                    onClick={() => setSelectedRunId(run.id)}
-                  >
-                    <td className="py-3 px-4 text-left text-xs font-mono text-muted-foreground">{formatDateTime(run.startedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.strategyId}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.accountType}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono"><span className={run.status === "completed" ? "text-positive" : run.status === "failed" ? "text-negative" : "text-muted-foreground"}>{run.status}</span></td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.trigger}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(run.completedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{formatDuration(run.startedAt, run.completedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.warnings.length}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-
-          <div className="border-t border-border p-4 space-y-3">
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Run Details</div>
+      {isRunDetailsModalOpen ? (
+        <div className="fixed inset-0 z-50 bg-background/75 p-4" onClick={closeRunDetails}>
+          <div className="mx-auto max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-lg border border-border bg-card p-4 space-y-3" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Run Details</div>
+                <div className="mt-1 text-xs font-mono text-foreground">{selectedRun?.strategyId ?? "--"}</div>
+              </div>
+              <button onClick={closeRunDetails} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary">
+                Close
+              </button>
+            </div>
 
             {loadingRunDetails ? (
               <div className="text-sm text-muted-foreground">Loading selected run details...</div>
@@ -1419,6 +1943,60 @@ export function AutomationPage() {
                 ) : null}
               </>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Runs</div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                {["Started", "Strategy", "Account", "Status", "Trigger", "Completed", "Duration", "Warn", "Actions"].map((heading) => (
+                  <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loadingRuns ? (
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading runs...</td></tr>
+              ) : runs.length === 0 ? (
+                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-muted-foreground">No runs yet.</td></tr>
+              ) : (
+                runs.slice(0, 12).map((run) => (
+                  <tr
+                    key={run.id}
+                    className={cn("border-b border-border cursor-pointer", run.id === selectedRunId ? "bg-secondary/40" : "hover:bg-secondary/20")}
+                    onClick={() => setSelectedRunId(run.id)}
+                  >
+                    <td className="py-3 px-4 text-left text-xs font-mono text-muted-foreground">{formatDateTime(run.startedAt)}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.strategyId}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.accountType}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono"><span className={run.status === "completed" ? "text-positive" : run.status === "failed" ? "text-negative" : "text-muted-foreground"}>{run.status}</span></td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.trigger}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(run.completedAt)}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{formatDuration(run.startedAt, run.completedAt)}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.warnings.length}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openRunDetails(run.id);
+                        }}
+                        className="px-2 py-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+
+          <div className="border-t border-border px-4 py-3 text-xs font-mono text-muted-foreground">
+            Use <span className="text-foreground">View</span> on a run row to open detailed results.
           </div>
         </div>
 

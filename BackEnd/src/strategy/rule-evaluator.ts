@@ -12,6 +12,9 @@ import {
   StrategyRule,
 } from "./types.js";
 
+const STRONGEST_ASSET_TOKEN = "STRONGEST_ASSET";
+const WEAKEST_ASSET_TOKEN = "WEAKEST_ASSET";
+
 interface EvaluationContext {
   strategy: StrategyConfig;
   currentAllocation: AllocationMap;
@@ -31,6 +34,54 @@ function compare(left: number, operator: StrategyOperator, right: number): boole
 function average(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function sortedSymbolsByRelativeStrength(context: EvaluationContext): string[] {
+  const resolver = createAssetGroupResolver(Object.keys(context.currentAllocation));
+  const stablecoins = new Set(resolver.getAssetsForToken("STABLECOINS"));
+  const candidates = Object.keys(context.currentAllocation)
+    .filter((symbol) => !stablecoins.has(symbol))
+    .sort((left, right) => left.localeCompare(right));
+
+  return candidates.sort((left, right) => {
+    const leftStrength =
+      context.signals.assetIndicators[left]?.relative_strength ?? context.signals.assetIndicators[left]?.price_change_24h ?? 0;
+    const rightStrength =
+      context.signals.assetIndicators[right]?.relative_strength ??
+      context.signals.assetIndicators[right]?.price_change_24h ??
+      0;
+    if (rightStrength !== leftStrength) return rightStrength - leftStrength;
+    return left.localeCompare(right);
+  });
+}
+
+function resolveDynamicAssetToken(token: string | undefined, context: EvaluationContext): string | undefined {
+  if (!token) return undefined;
+  const normalized = token.toUpperCase();
+  if (normalized !== STRONGEST_ASSET_TOKEN && normalized !== WEAKEST_ASSET_TOKEN) {
+    return normalized;
+  }
+
+  const ranked = sortedSymbolsByRelativeStrength(context);
+  if (ranked.length === 0) return undefined;
+  return normalized === STRONGEST_ASSET_TOKEN ? ranked[0] : ranked[ranked.length - 1];
+}
+
+function resolveConditionAsset(condition: StrategyCondition, context: EvaluationContext): StrategyCondition {
+  const resolvedAsset = resolveDynamicAssetToken(condition.asset, context);
+  return {
+    ...condition,
+    asset: resolvedAsset,
+  };
+}
+
+function resolveRuleAction(rule: StrategyRule, context: EvaluationContext): StrategyRule["action"] {
+  return {
+    ...rule.action,
+    asset: resolveDynamicAssetToken(rule.action.asset, context),
+    from: resolveDynamicAssetToken(rule.action.from, context),
+    to: resolveDynamicAssetToken(rule.action.to, context),
+  };
 }
 
 function getIndicatorValue(condition: StrategyCondition, context: EvaluationContext): number {
@@ -61,6 +112,17 @@ function getIndicatorValue(condition: StrategyCondition, context: EvaluationCont
     if (symbol) return signals.assetIndicators[symbol]?.volume_change ?? 0;
     const changes = Object.values(signals.assetIndicators).map((entry) => entry.volume_change ?? 0);
     return average(changes);
+  }
+
+  if (condition.indicator === "relative_strength") {
+    if (symbol) return signals.assetIndicators[symbol]?.relative_strength ?? 0;
+    const strengths = Object.values(signals.assetIndicators).map((entry) => entry.relative_strength ?? 0);
+    return average(strengths);
+  }
+
+  if (condition.indicator === "drawdown_pct") {
+    if (symbol) return signals.assetIndicators[symbol]?.drawdown_pct ?? signals.indicators.drawdown_pct ?? 0;
+    return signals.indicators.drawdown_pct ?? 0;
   }
 
   return signals.indicators[condition.indicator] ?? 0;
@@ -94,8 +156,10 @@ export function evaluateRules(input: {
   const actionReasonsByAsset: Record<string, string> = {};
 
   for (const rule of sortedActiveRules(input.strategy.rules)) {
-    const indicatorValue = getIndicatorValue(rule.condition, context);
-    const matched = compare(indicatorValue, rule.condition.operator, rule.condition.value);
+    const resolvedCondition = resolveConditionAsset(rule.condition, context);
+    const resolvedAction = resolveRuleAction(rule, context);
+    const indicatorValue = getIndicatorValue(resolvedCondition, context);
+    const matched = compare(indicatorValue, resolvedCondition.operator, resolvedCondition.value);
 
     if (!matched) {
       traces.push({
@@ -103,16 +167,16 @@ export function evaluateRules(input: {
         ruleName: rule.name,
         matched: false,
         conditionValue: round(indicatorValue, 6),
-        operator: rule.condition.operator,
-        expectedValue: round(rule.condition.value, 6),
+        operator: resolvedCondition.operator,
+        expectedValue: round(resolvedCondition.value, 6),
         actionApplied: false,
-        message: `Condition not met for ${rule.condition.indicator}.`,
+        message: `Condition not met for ${resolvedCondition.indicator}.`,
       });
       continue;
     }
 
     const resolver = createAssetGroupResolver(Object.keys(context.currentAllocation));
-    const adjusted = applyActionToAllocation(context.currentAllocation, rule.action, resolver);
+    const adjusted = applyActionToAllocation(context.currentAllocation, resolvedAction, resolver);
 
     context.currentAllocation = normalizeAllocation(adjusted.allocation, symbols);
     adjusted.changedAssets.forEach((asset) => {

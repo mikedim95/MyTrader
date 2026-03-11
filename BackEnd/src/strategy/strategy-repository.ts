@@ -166,13 +166,27 @@ export class StrategyRepository {
       await writeFile(this.storePath, JSON.stringify(store, null, 2), "utf8");
     }
 
+    const nowIso = new Date().toISOString();
+    const presetStrategies = buildPresetStrategies(nowIso);
     if (store.strategies.length === 0) {
-      const nowIso = new Date().toISOString();
-      store.strategies = buildPresetStrategies(nowIso).map((strategy) => ({
+      store.strategies = presetStrategies.map((strategy) => ({
         ...strategy,
         nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
       }));
       await this.writeStore(store);
+    } else {
+      const existingById = new Set(store.strategies.map((strategy) => strategy.id));
+      const missingPresets = presetStrategies
+        .filter((strategy) => !existingById.has(strategy.id))
+        .map((strategy) => ({
+          ...strategy,
+          nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
+        }));
+
+      if (missingPresets.length > 0) {
+        store.strategies.push(...missingPresets);
+        await this.writeStore(store);
+      }
     }
 
     this.initialized = true;

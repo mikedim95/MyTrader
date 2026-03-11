@@ -10,6 +10,8 @@ export const STRATEGY_INDICATORS = [
   "price_change_24h",
   "volume_change",
   "market_direction",
+  "relative_strength",
+  "drawdown_pct",
 ] as const;
 export type StrategyIndicator = (typeof STRATEGY_INDICATORS)[number];
 
@@ -27,6 +29,12 @@ export type StrategyActionType = (typeof STRATEGY_ACTION_TYPES)[number];
 
 export const STRATEGY_MODES = ["manual", "semi_auto", "auto"] as const;
 export type StrategyMode = (typeof STRATEGY_MODES)[number];
+
+export const STRATEGY_COMPOSITION_MODES = ["manual", "automatic"] as const;
+export type StrategyCompositionMode = (typeof STRATEGY_COMPOSITION_MODES)[number];
+
+export const MARKET_REGIMES = ["risk_on", "neutral", "risk_off", "high_volatility"] as const;
+export type MarketRegime = (typeof MARKET_REGIMES)[number];
 
 export const PORTFOLIO_ACCOUNT_TYPES = ["real", "demo"] as const;
 export type PortfolioAccountType = (typeof PORTFOLIO_ACCOUNT_TYPES)[number];
@@ -78,6 +86,35 @@ export interface StrategyMetadata {
   tags?: string[];
 }
 
+export interface StrategySelectionConfig {
+  minStrategyScore?: number;
+  maxActiveStrategies?: number;
+  maxWeightShiftPerCycle?: number;
+  strategyCooldownHours?: number;
+  minActiveDurationHours?: number;
+  fallbackStrategy?: string;
+}
+
+export interface StrategyWeightAdjustmentConfig {
+  scorePower?: number;
+  minWeightPctPerStrategy?: number;
+  maxWeightPctPerStrategy?: number;
+}
+
+export interface StrategyScoreComponents {
+  recent_return: number;
+  drawdown_penalty: number;
+  turnover_penalty: number;
+  regime_fit: number;
+  stability: number;
+}
+
+export interface StrategyScoreResult {
+  strategyId: string;
+  score: number;
+  components: StrategyScoreComponents;
+}
+
 export interface DemoAccountSettings {
   balance: number;
   updatedAt: string;
@@ -97,6 +134,12 @@ export interface StrategyConfig {
   lastRunAt?: string;
   nextRunAt?: string;
   disabledAssets?: string[];
+  compositionMode?: StrategyCompositionMode;
+  baseStrategies?: string[];
+  strategyWeights?: Record<string, number>;
+  autoStrategyUsage?: boolean;
+  strategySelectionConfig?: StrategySelectionConfig;
+  weightAdjustmentConfig?: StrategyWeightAdjustmentConfig;
   createdAt: string;
   updatedAt: string;
 }
@@ -201,6 +244,13 @@ export interface StrategyEvaluationResult {
   warnings: string[];
   rebalancePlan: RebalancePlan;
   executionPlan: ExecutionPlan;
+  composition?: {
+    compositionMode: StrategyCompositionMode;
+    autoStrategyUsage: boolean;
+    marketRegime: MarketRegime;
+    strategyScores: StrategyScoreResult[];
+    activeStrategyWeights: Record<string, number>;
+  };
 }
 
 export interface StrategyRun {

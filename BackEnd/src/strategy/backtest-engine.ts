@@ -11,6 +11,7 @@ import {
   HistoricalMarketDataSource,
   MarketSignalSnapshot,
   PortfolioState,
+  StrategyConfig,
 } from "./types.js";
 import { normalizeAllocation, round, sortSymbols } from "./allocation-utils.js";
 
@@ -129,6 +130,13 @@ export class BacktestEngine {
     if (!strategy) {
       throw new Error(`Strategy ${request.strategyId} was not found.`);
     }
+    const strategyUniverse = (await this.repository.listStrategies()).reduce<Record<string, StrategyConfig>>(
+      (acc, item) => {
+        acc[item.id] = item;
+        return acc;
+      },
+      {}
+    );
 
     const run = await this.repository.createBacktestRun({
       strategyId: request.strategyId,
@@ -177,6 +185,7 @@ export class BacktestEngine {
           strategy,
           portfolio: portfolioBefore,
           marketSignals: point.signals,
+          strategyUniverse,
         });
 
         let turnoverPct = 0;

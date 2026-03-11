@@ -3,9 +3,11 @@ import {
   StrategyActionType,
   StrategyConfig,
   StrategyCondition,
+  StrategyCompositionMode,
   StrategyGuardConfig,
   StrategyRule,
   STRATEGY_ACTION_TYPES,
+  STRATEGY_COMPOSITION_MODES,
   STRATEGY_INDICATORS,
   STRATEGY_MODES,
   STRATEGY_OPERATORS,
@@ -75,6 +77,27 @@ const metadataSchema = z
   })
   .optional();
 
+const strategyWeightsSchema = z.record(z.string().min(1), z.number().finite().min(0).max(100)).default({});
+
+const strategySelectionConfigSchema = z
+  .object({
+    minStrategyScore: z.number().finite().min(0).max(1).optional(),
+    maxActiveStrategies: z.number().int().min(1).max(20).optional(),
+    maxWeightShiftPerCycle: z.number().finite().min(0).max(100).optional(),
+    strategyCooldownHours: z.number().int().min(0).max(720).optional(),
+    minActiveDurationHours: z.number().int().min(0).max(720).optional(),
+    fallbackStrategy: z.string().min(1).optional(),
+  })
+  .default({});
+
+const weightAdjustmentConfigSchema = z
+  .object({
+    scorePower: z.number().finite().min(0.1).max(5).optional(),
+    minWeightPctPerStrategy: z.number().finite().min(0).max(100).optional(),
+    maxWeightPctPerStrategy: z.number().finite().min(0).max(100).optional(),
+  })
+  .default({});
+
 export const strategyDslSchema = z.object({
   id: z.string().min(1).optional(),
   name: z.string().min(1),
@@ -89,6 +112,12 @@ export const strategyDslSchema = z.object({
   lastRunAt: z.string().datetime().optional(),
   nextRunAt: z.string().datetime().optional(),
   disabledAssets: z.array(z.string().min(1)).optional(),
+  compositionMode: z.enum(STRATEGY_COMPOSITION_MODES).default("manual"),
+  baseStrategies: z.array(z.string().min(1)).default([]),
+  strategyWeights: strategyWeightsSchema,
+  autoStrategyUsage: z.boolean().default(false),
+  strategySelectionConfig: strategySelectionConfigSchema,
+  weightAdjustmentConfig: weightAdjustmentConfigSchema,
 });
 
 export type StrategyDslInput = z.infer<typeof strategyDslSchema>;
@@ -134,6 +163,36 @@ function normalizeGuards(guards: StrategyGuardConfig): StrategyGuardConfig {
     min_trade_notional: guards.min_trade_notional,
     cash_reserve_pct: guards.cash_reserve_pct,
   };
+}
+
+function normalizeCompositionMode(mode: StrategyCompositionMode | undefined): StrategyCompositionMode {
+  return mode === "automatic" ? "automatic" : "manual";
+}
+
+function normalizeBaseStrategies(baseStrategies: string[] | undefined): string[] {
+  if (!Array.isArray(baseStrategies)) return [];
+
+  return Array.from(
+    new Set(
+      baseStrategies
+        .map((strategyId) => strategyId.trim().toLowerCase())
+        .filter((strategyId) => strategyId.length > 0)
+    )
+  );
+}
+
+function normalizeStrategyWeights(weights: Record<string, number> | undefined): Record<string, number> {
+  if (!weights) return {};
+  const normalized: Record<string, number> = {};
+
+  Object.entries(weights).forEach(([strategyId, raw]) => {
+    const key = strategyId.trim().toLowerCase();
+    if (!key) return;
+    if (!Number.isFinite(raw) || raw < 0) return;
+    normalized[key] = raw;
+  });
+
+  return normalized;
 }
 
 function normalizeBaseAllocation(baseAllocation: Record<string, number>): Record<string, number> {
@@ -201,6 +260,23 @@ export function validateStrategyDsl(input: unknown, nowIso = new Date().toISOStr
     lastRunAt: parsed.data.lastRunAt,
     nextRunAt: parsed.data.nextRunAt,
     disabledAssets: parsed.data.disabledAssets?.map(toUpperSymbol),
+    compositionMode: normalizeCompositionMode(parsed.data.compositionMode),
+    baseStrategies: normalizeBaseStrategies(parsed.data.baseStrategies),
+    strategyWeights: normalizeStrategyWeights(parsed.data.strategyWeights),
+    autoStrategyUsage: Boolean(parsed.data.autoStrategyUsage),
+    strategySelectionConfig: {
+      minStrategyScore: parsed.data.strategySelectionConfig.minStrategyScore,
+      maxActiveStrategies: parsed.data.strategySelectionConfig.maxActiveStrategies,
+      maxWeightShiftPerCycle: parsed.data.strategySelectionConfig.maxWeightShiftPerCycle,
+      strategyCooldownHours: parsed.data.strategySelectionConfig.strategyCooldownHours,
+      minActiveDurationHours: parsed.data.strategySelectionConfig.minActiveDurationHours,
+      fallbackStrategy: parsed.data.strategySelectionConfig.fallbackStrategy?.trim().toLowerCase(),
+    },
+    weightAdjustmentConfig: {
+      scorePower: parsed.data.weightAdjustmentConfig.scorePower,
+      minWeightPctPerStrategy: parsed.data.weightAdjustmentConfig.minWeightPctPerStrategy,
+      maxWeightPctPerStrategy: parsed.data.weightAdjustmentConfig.maxWeightPctPerStrategy,
+    },
     createdAt: nowIso,
     updatedAt: nowIso,
   };

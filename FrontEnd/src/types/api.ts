@@ -119,6 +119,8 @@ export interface NicehashAssetBalance {
 }
 
 export type StrategyMode = "manual" | "semi_auto" | "auto";
+export type StrategyCompositionMode = "manual" | "automatic";
+export type MarketRegime = "risk_on" | "neutral" | "risk_off" | "high_volatility";
 export type StrategyOperator = ">" | "<" | ">=" | "<=" | "==" | "!=";
 export type StrategyActionType =
   | "increase"
@@ -176,6 +178,35 @@ export interface StrategyMetadata {
   tags?: string[];
 }
 
+export interface StrategySelectionConfig {
+  minStrategyScore?: number;
+  maxActiveStrategies?: number;
+  maxWeightShiftPerCycle?: number;
+  strategyCooldownHours?: number;
+  minActiveDurationHours?: number;
+  fallbackStrategy?: string;
+}
+
+export interface StrategyWeightAdjustmentConfig {
+  scorePower?: number;
+  minWeightPctPerStrategy?: number;
+  maxWeightPctPerStrategy?: number;
+}
+
+export interface StrategyScoreComponents {
+  recent_return: number;
+  drawdown_penalty: number;
+  turnover_penalty: number;
+  regime_fit: number;
+  stability: number;
+}
+
+export interface StrategyScoreResult {
+  strategyId: string;
+  score: number;
+  components: StrategyScoreComponents;
+}
+
 export interface StrategyConfig {
   id: string;
   name: string;
@@ -190,6 +221,12 @@ export interface StrategyConfig {
   lastRunAt?: string;
   nextRunAt?: string;
   disabledAssets?: string[];
+  compositionMode?: StrategyCompositionMode;
+  baseStrategies?: string[];
+  strategyWeights?: Record<string, number>;
+  autoStrategyUsage?: boolean;
+  strategySelectionConfig?: StrategySelectionConfig;
+  weightAdjustmentConfig?: StrategyWeightAdjustmentConfig;
   createdAt: string;
   updatedAt: string;
 }
@@ -274,12 +311,20 @@ export interface StrategyStateResponse {
   strategyId: string;
   accountType: PortfolioAccountType;
   currentAllocation: AllocationMap;
+  baseAllocation: AllocationMap;
   adjustedTargetAllocation: AllocationMap;
   portfolio: PortfolioState;
   signals: MarketSignalSnapshot;
   executionPlan: ExecutionPlan;
   traces: RuleEvaluationTrace[];
   warnings: string[];
+  composition?: {
+    compositionMode: StrategyCompositionMode;
+    autoStrategyUsage: boolean;
+    marketRegime: MarketRegime;
+    strategyScores: StrategyScoreResult[];
+    activeStrategyWeights: Record<string, number>;
+  };
 }
 
 export interface BacktestRun {

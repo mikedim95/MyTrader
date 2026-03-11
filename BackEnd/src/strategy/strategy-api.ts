@@ -164,12 +164,14 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
         strategyId: state.strategy.id,
         accountType: state.accountType,
         currentAllocation: state.evaluation.currentAllocation,
+        baseAllocation: state.evaluation.baseAllocation,
         adjustedTargetAllocation: state.evaluation.adjustedTargetAllocation,
         portfolio: state.portfolio,
         signals: state.marketSignals,
         executionPlan: state.evaluation.executionPlan,
         traces: state.evaluation.traces,
         warnings: state.evaluation.warnings,
+        composition: state.evaluation.composition,
       });
     } catch (error) {
       res.status(500).json({ message: error instanceof Error ? error.message : "Unable to evaluate strategy state." });
