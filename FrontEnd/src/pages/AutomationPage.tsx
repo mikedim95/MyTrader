@@ -543,6 +543,7 @@ function draftToPayload(draft: StrategyDraft, strategyId: string): unknown {
 export function AutomationPage() {
   const queryClient = useQueryClient();
   const [accountType, setAccountType] = useState<PortfolioAccountType>("real");
+  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
 
   const { data: strategyData, isPending: loadingStrategies, error: strategyError } = useStrategies();
   const { data: demoAccountData, isPending: loadingDemoAccount } = useDemoAccountSettings();
@@ -866,6 +867,15 @@ export function AutomationPage() {
     updateDemoBalanceMutation.mutate(parsed);
   };
 
+  const openStrategyEditor = (strategyId: string): void => {
+    setSelectedStrategyId(strategyId);
+    setIsEditorModalOpen(true);
+  };
+
+  const closeStrategyEditor = (): void => {
+    setIsEditorModalOpen(false);
+  };
+
   const runIndicators = selectedRun?.inputSnapshot?.marketSignals.indicators ?? {};
   const demoBalanceCurrent = demoAccountData?.demoAccount.balance;
   const demoBalanceParsed = Number(demoBalanceDraft);
@@ -975,16 +985,16 @@ export function AutomationPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Name", "Mode", "Enabled", "Interval", "Risk", "Next Run"].map((heading) => (
+                {["Name", "Mode", "Enabled", "Interval", "Risk", "Next Run", "Actions"].map((heading) => (
                   <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loadingStrategies ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading strategies...</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading strategies...</td></tr>
               ) : strategies.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No strategies found.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">No strategies found.</td></tr>
               ) : (
                 strategies.map((strategy) => (
                   <tr
@@ -998,6 +1008,17 @@ export function AutomationPage() {
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.scheduleInterval}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.metadata?.riskLevel ?? "--"}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(strategy.nextRunAt)}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openStrategyEditor(strategy.id);
+                        }}
+                        className="px-2 py-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
+                      >
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -1034,14 +1055,20 @@ export function AutomationPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Structured Strategy Editor</div>
-          <div className="flex gap-2">
-            <button onClick={handleResetDraft} disabled={busy || !draftDirty || !selectedStrategy} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
-            <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || !selectedStrategy || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">Save Strategy</button>
-          </div>
-        </div>
+      {isEditorModalOpen ? (
+        <div className="fixed inset-0 z-50 bg-background/75 p-4" onClick={closeStrategyEditor}>
+          <div className="mx-auto max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-lg border border-border bg-card p-4 space-y-4" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Structured Strategy Editor</div>
+                <div className="mt-1 text-xs font-mono text-foreground">{selectedStrategy?.name ?? "Selected Strategy"}</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={closeStrategyEditor} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary">Close</button>
+                <button onClick={handleResetDraft} disabled={busy || !draftDirty || !selectedStrategy} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
+                <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || !selectedStrategy || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">Save Strategy</button>
+              </div>
+            </div>
         {draftHasErrors ? <div className="text-xs font-mono text-negative">Fix inline validation errors to enable save.</div> : null}
 
         {!draft ? (
@@ -1267,7 +1294,9 @@ export function AutomationPage() {
             </div>
           </>
         )}
-      </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="rounded-lg border border-border bg-card overflow-hidden">
