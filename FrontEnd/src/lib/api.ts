@@ -119,6 +119,10 @@ export const backendApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  deleteStrategy: (strategyId: string) =>
+    apiRequest<{ success: boolean }>(`/api/strategies/${strategyId}`, {
+      method: "DELETE",
+    }),
   runStrategyNow: (strategyId: string, accountType: PortfolioAccountType = "real") =>
     apiRequest<StrategyRunResponse>(withQuery(`/api/strategies/${strategyId}/run-now`, { accountType }), {
       method: "POST",

@@ -264,6 +264,14 @@ export class StrategyRepository {
     });
   }
 
+  async deleteStrategy(strategyId: string): Promise<boolean> {
+    return this.mutate((store) => {
+      const before = store.strategies.length;
+      store.strategies = store.strategies.filter((strategy) => strategy.id !== strategyId);
+      return store.strategies.length < before;
+    });
+  }
+
   async setStrategyEnabled(strategyId: string, isEnabled: boolean): Promise<StrategyConfig | null> {
     return this.mutate((store) => {
       const strategy = store.strategies.find((item) => item.id === strategyId);
