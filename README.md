@@ -26,3 +26,22 @@ npm run dev
 3. Open the frontend URL (default: `http://localhost:8080`).
 
 4. In **Settings**, connect Binance with API key/secret or configure backend `.env`.
+
+## Docker image build/push on commit
+
+This repo now includes a GitHub Actions workflow at `.github/workflows/docker-publish.yml` that builds and pushes multi-arch images on each commit push.
+
+Images pushed to Docker Hub:
+
+- `docker.io/<DOCKERHUB_USERNAME>/mytrader-backend`
+- `docker.io/<DOCKERHUB_USERNAME>/mytrader-frontend`
+
+### Required GitHub repository secrets
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN` (Docker Hub access token with write permissions)
+
+### Tags
+
+- `sha-<commit>` for every push
+- `latest` for the default branch
