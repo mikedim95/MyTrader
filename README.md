@@ -45,3 +45,8 @@ Images pushed to Docker Hub:
 
 - `sha-<commit>` for every push
 - `latest` for the default branch
+
+### Notes
+
+- Docker builds use the repository root as context so shared ignore rules in `.dockerignore` are applied consistently.
+- The frontend container ships an Nginx SPA fallback (`try_files ... /index.html`) so direct deep-link routes work after deployment.
