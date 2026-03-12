@@ -16,6 +16,7 @@ import { StrategyRepository } from "./strategy/strategy-repository.js";
 import { StrategyRunner } from "./strategy/strategy-runner.js";
 import { StrategyScheduler } from "./strategy/strategy-scheduler.js";
 import { createStrategyRouter } from "./strategy/strategy-api.js";
+import { resolveStrategyUserScope } from "./strategy/strategy-user-scope.js";
 
 const app = express();
 
@@ -198,7 +199,8 @@ app.delete("/api/binance/connection", async (_req, res) => {
 
 app.get("/api/dashboard", async (req, res) => {
   if (parseDashboardAccountType(req) === "demo") {
-    const demoAccount = await strategyRepository.getDemoAccountSettings();
+    const userScope = resolveStrategyUserScope(req);
+    const demoAccount = await strategyRepository.getDemoAccountSettings(userScope);
     const dashboard = await getDemoDashboardData(demoAccount.balance);
     res.json(dashboard);
     return;

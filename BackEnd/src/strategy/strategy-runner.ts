@@ -2,6 +2,7 @@ import { StrategyEngine } from "./strategy-engine.js";
 import { StrategyRepository } from "./strategy-repository.js";
 import { buildMarketSignalsFromPortfolio } from "./market-signal-service.js";
 import { getPortfolioState } from "./portfolio-state-service.js";
+import { strategyUserScopeKey, StrategyUserScope } from "./strategy-user-scope.js";
 import {
   MarketSignalSnapshot,
   PortfolioAccountType,
@@ -16,22 +17,22 @@ export class StrategyRunner {
 
   constructor(private readonly repository: StrategyRepository, private readonly engine = new StrategyEngine()) {}
 
-  private runKey(strategyId: string, accountType: PortfolioAccountType): string {
-    return `${strategyId}:${accountType}`;
+  private runKey(strategyId: string, accountType: PortfolioAccountType, userScope?: StrategyUserScope): string {
+    return `${strategyUserScopeKey(userScope)}:${strategyId}:${accountType}`;
   }
 
-  isRunning(strategyId: string, accountType: PortfolioAccountType = "real"): boolean {
-    return this.activeStrategies.has(this.runKey(strategyId, accountType));
+  isRunning(strategyId: string, accountType: PortfolioAccountType = "real", userScope?: StrategyUserScope): boolean {
+    return this.activeStrategies.has(this.runKey(strategyId, accountType, userScope));
   }
 
-  private async resolveDemoBalance(accountType: PortfolioAccountType): Promise<number | undefined> {
+  private async resolveDemoBalance(accountType: PortfolioAccountType, userScope?: StrategyUserScope): Promise<number | undefined> {
     if (accountType !== "demo") return undefined;
-    const demoSettings = await this.repository.getDemoAccountSettings();
+    const demoSettings = await this.repository.getDemoAccountSettings(userScope);
     return demoSettings.balance;
   }
 
-  private async buildStrategyUniverse(): Promise<Record<string, StrategyConfig>> {
-    const strategies = await this.repository.listStrategies();
+  private async buildStrategyUniverse(userScope?: StrategyUserScope): Promise<Record<string, StrategyConfig>> {
+    const strategies = await this.repository.listStrategies(userScope);
     return strategies.reduce<Record<string, StrategyConfig>>((acc, strategy) => {
       acc[strategy.id] = strategy;
       return acc;
@@ -40,7 +41,8 @@ export class StrategyRunner {
 
   async evaluateStrategyState(
     strategyId: string,
-    accountType?: PortfolioAccountType
+    accountType?: PortfolioAccountType,
+    userScope?: StrategyUserScope
   ): Promise<{
     strategy: StrategyConfig;
     evaluation: StrategyEvaluationResult;
@@ -48,20 +50,24 @@ export class StrategyRunner {
     marketSignals: MarketSignalSnapshot;
     accountType: PortfolioAccountType;
   } | null>;
-  async evaluateStrategyState(strategyId: string, accountType: PortfolioAccountType = "real"): Promise<{
+  async evaluateStrategyState(
+    strategyId: string,
+    accountType: PortfolioAccountType = "real",
+    userScope?: StrategyUserScope
+  ): Promise<{
     strategy: StrategyConfig;
     evaluation: StrategyEvaluationResult;
     portfolio: PortfolioState;
     marketSignals: MarketSignalSnapshot;
     accountType: PortfolioAccountType;
   } | null> {
-    const strategy = await this.repository.getStrategy(strategyId);
+    const strategy = await this.repository.getStrategy(strategyId, userScope);
     if (!strategy) return null;
 
-    const demoBalance = await this.resolveDemoBalance(accountType);
+    const demoBalance = await this.resolveDemoBalance(accountType, userScope);
     const portfolio = await getPortfolioState(accountType, "USDC", { demoCapital: demoBalance });
     const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
-    const strategyUniverse = await this.buildStrategyUniverse();
+    const strategyUniverse = await this.buildStrategyUniverse(userScope);
 
     const evaluation = this.engine.evaluate({
       strategy,
@@ -83,14 +89,15 @@ export class StrategyRunner {
   async runStrategy(
     strategyId: string,
     trigger: StrategyRun["trigger"] = "api",
-    accountType: PortfolioAccountType = "real"
+    accountType: PortfolioAccountType = "real",
+    userScope?: StrategyUserScope
   ): Promise<StrategyRun> {
-    const strategy = await this.repository.getStrategy(strategyId);
+    const strategy = await this.repository.getStrategy(strategyId, userScope);
     if (!strategy) {
       throw new Error(`Strategy ${strategyId} was not found.`);
     }
 
-    const runKey = this.runKey(strategyId, accountType);
+    const runKey = this.runKey(strategyId, accountType, userScope);
 
     if (this.activeStrategies.has(runKey)) {
       return this.repository.createStrategyRun({
@@ -99,7 +106,7 @@ export class StrategyRunner {
         accountType,
         mode: strategy.executionMode,
         trigger,
-      });
+      }, userScope);
     }
 
     if (trigger === "schedule" && (!strategy.isEnabled || strategy.executionMode === "manual")) {
@@ -109,7 +116,7 @@ export class StrategyRunner {
         accountType,
         mode: strategy.executionMode,
         trigger,
-      });
+      }, userScope);
     }
 
     this.activeStrategies.add(runKey);
@@ -120,20 +127,20 @@ export class StrategyRunner {
       accountType,
       mode: strategy.executionMode,
       trigger,
-    });
+    }, userScope);
 
     try {
-      const demoBalance = await this.resolveDemoBalance(accountType);
+      const demoBalance = await this.resolveDemoBalance(accountType, userScope);
       const portfolio = await getPortfolioState(accountType, "USDC", { demoCapital: demoBalance });
       const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
-      const strategyUniverse = await this.buildStrategyUniverse();
+      const strategyUniverse = await this.buildStrategyUniverse(userScope);
 
       run = (await this.repository.updateStrategyRun(run.id, {
         inputSnapshot: {
           portfolio,
           marketSignals,
         },
-      })) ?? run;
+      }, userScope)) ?? run;
 
       const evaluation = this.engine.evaluate({
         strategy,
@@ -143,7 +150,7 @@ export class StrategyRunner {
         strategyUniverse,
       });
 
-      await this.repository.saveExecutionPlan(evaluation.executionPlan);
+      await this.repository.saveExecutionPlan(evaluation.executionPlan, userScope);
 
       const completedAt = new Date().toISOString();
       const completed = await this.repository.updateStrategyRun(run.id, {
@@ -153,9 +160,9 @@ export class StrategyRunner {
         adjustedAllocation: evaluation.adjustedTargetAllocation,
         executionPlanId: evaluation.executionPlan.id,
         warnings: evaluation.warnings,
-      });
+      }, userScope);
 
-      await this.repository.updateStrategyRunTimestamps(strategy.id, completedAt);
+      await this.repository.updateStrategyRunTimestamps(strategy.id, completedAt, userScope);
 
       return completed ?? run;
     } catch (error) {
@@ -163,7 +170,7 @@ export class StrategyRunner {
         status: "failed",
         completedAt: new Date().toISOString(),
         error: error instanceof Error ? error.message : "Strategy run failed.",
-      });
+      }, userScope);
 
       return failed ?? run;
     } finally {

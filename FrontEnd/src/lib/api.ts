@@ -23,6 +23,29 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
+function resolveUserScope(): { userId?: number; username?: string } {
+  if (typeof window === "undefined") return {};
+
+  const params = new URLSearchParams(window.location.search);
+  const rawUserId = params.get("userId");
+  const userId = rawUserId ? Number.parseInt(rawUserId, 10) : Number.NaN;
+  if (Number.isInteger(userId) && userId > 0) {
+    return { userId };
+  }
+
+  const userFromQuery = params.get("user") ?? params.get("username");
+  if (userFromQuery && userFromQuery.trim().length > 0) {
+    return { username: userFromQuery.trim().toLowerCase() };
+  }
+
+  const userFromStorage = window.localStorage.getItem("mytrader_user");
+  if (userFromStorage && userFromStorage.trim().length > 0) {
+    return { username: userFromStorage.trim().toLowerCase() };
+  }
+
+  return {};
+}
+
 interface ConnectRequest {
   apiKey: string;
   apiSecret: string;
@@ -55,6 +78,12 @@ function parseJsonSafely(text: string): unknown {
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
+  const userScope = resolveUserScope();
+  if (typeof userScope.userId === "number") {
+    headers.set("x-user-id", String(userScope.userId));
+  } else if (userScope.username) {
+    headers.set("x-user", userScope.username);
+  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,

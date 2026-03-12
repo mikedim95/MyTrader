@@ -15,6 +15,7 @@ import {
 } from "./types.js";
 import { buildPresetStrategies } from "./strategy-presets.js";
 import { createNextRunAt } from "./allocation-utils.js";
+import { StrategyUserScope } from "./strategy-user-scope.js";
 
 const DEFAULT_DEMO_ACCOUNT_BALANCE = 10_000;
 const DEFAULT_DEMO_UPDATED_AT = new Date().toISOString();
@@ -188,6 +189,7 @@ export class StrategyRepository {
   private initPromise: Promise<void> | null = null;
   private activeUserId: number | null = null;
   private activeUsername: string | null = null;
+  private readonly bootstrappedUserIds = new Set<number>();
 
   constructor(customPath?: string) {
     this.storePath = customPath ?? path.join(process.cwd(), "data", "strategy-store.json");
@@ -220,6 +222,15 @@ export class StrategyRepository {
       throw new Error("Strategy repository active user is not initialized.");
     }
     return this.activeUserId;
+  }
+
+  private normalizeScope(scope?: StrategyUserScope): StrategyUserScope | undefined {
+    if (!scope) return undefined;
+    const userId =
+      typeof scope.userId === "number" && Number.isInteger(scope.userId) && scope.userId > 0 ? scope.userId : undefined;
+    const username = typeof scope.username === "string" ? scope.username.trim().toLowerCase() : undefined;
+    if (!userId && !username) return undefined;
+    return { userId, username };
   }
 
   private async withConnection<T>(handler: (conn: PoolConnection) => Promise<T>): Promise<T> {
@@ -266,6 +277,35 @@ export class StrategyRepository {
     }
   }
 
+  private async getOrCreateUserByUsername(conn: PoolConnection, username: string): Promise<UserRow> {
+    const normalizedUsername = username.trim().toLowerCase();
+    const email = `${normalizedUsername}@myapp.local`;
+
+    await conn.query(
+      `
+        INSERT INTO agent_users (username, email)
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE email = VALUES(email)
+      `,
+      [normalizedUsername, email]
+    );
+
+    const [rows] = await conn.query<UserRow[]>(
+      `
+        SELECT id, username
+        FROM agent_users
+        WHERE LOWER(username) = LOWER(?)
+        LIMIT 1
+      `,
+      [normalizedUsername]
+    );
+    const user = rows[0];
+    if (!user) {
+      throw new Error(`Unable to resolve strategy repository user ${normalizedUsername}.`);
+    }
+    return user;
+  }
+
   private async resolveActiveUser(conn: PoolConnection): Promise<void> {
     const configuredUserId = Number.parseInt(String(process.env.MYAPP_ACTIVE_USER_ID ?? ""), 10);
     if (Number.isInteger(configuredUserId) && configuredUserId > 0) {
@@ -287,32 +327,82 @@ export class StrategyRepository {
     }
 
     const configuredUsername = (process.env.MYAPP_ACTIVE_USER ?? DEFAULT_ACTIVE_USER).trim().toLowerCase();
-    const configuredEmail = `${configuredUsername}@myapp.local`;
-    await conn.query(
-      `
-        INSERT INTO agent_users (username, email)
-        VALUES (?, ?)
-        ON DUPLICATE KEY UPDATE email = VALUES(email)
-      `,
-      [configuredUsername, configuredEmail]
-    );
-
-    const [rows] = await conn.query<UserRow[]>(
-      `
-        SELECT id, username
-        FROM agent_users
-        WHERE LOWER(username) = LOWER(?)
-        LIMIT 1
-      `,
-      [configuredUsername]
-    );
-    const user = rows[0];
-    if (!user) {
-      throw new Error(`Unable to resolve strategy repository user ${configuredUsername}.`);
-    }
+    const user = await this.getOrCreateUserByUsername(conn, configuredUsername);
 
     this.activeUserId = user.id;
     this.activeUsername = user.username;
+  }
+
+  private async ensureStoreForUser(
+    conn: PoolConnection,
+    userId: number,
+    options?: { allowLegacyImport: boolean }
+  ): Promise<void> {
+    if (this.bootstrappedUserIds.has(userId)) return;
+
+    let store = await this.readStoreForUser(conn, userId);
+    if (!store) {
+      if (options?.allowLegacyImport) {
+        store = (await this.loadLegacyStoreFromDisk()) ?? cloneStore(DEFAULT_STORE);
+      } else {
+        store = cloneStore(DEFAULT_STORE);
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const presetStrategies = buildPresetStrategies(nowIso);
+    if (store.strategies.length === 0) {
+      store.strategies = presetStrategies.map((strategy) => ({
+        ...strategy,
+        nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
+      }));
+    } else {
+      const existingById = new Set(store.strategies.map((strategy) => strategy.id));
+      const missingPresets = presetStrategies
+        .filter((strategy) => !existingById.has(strategy.id))
+        .map((strategy) => ({
+          ...strategy,
+          nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
+        }));
+      if (missingPresets.length > 0) {
+        store.strategies.push(...missingPresets);
+      }
+    }
+
+    store.demoAccount = normalizeDemoAccountSettings(store.demoAccount);
+    await this.writeStoreForUser(conn, userId, store);
+    this.bootstrappedUserIds.add(userId);
+  }
+
+  private async resolveUserId(conn: PoolConnection, scope?: StrategyUserScope): Promise<number> {
+    const normalizedScope = this.normalizeScope(scope);
+    if (!normalizedScope) {
+      const userId = this.requireActiveUserId();
+      await this.ensureStoreForUser(conn, userId, { allowLegacyImport: true });
+      return userId;
+    }
+
+    if (normalizedScope.userId) {
+      const [rows] = await conn.query<UserRow[]>(
+        `
+          SELECT id, username
+          FROM agent_users
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [normalizedScope.userId]
+      );
+      const user = rows[0];
+      if (!user) {
+        throw new Error(`User id ${normalizedScope.userId} was not found.`);
+      }
+      await this.ensureStoreForUser(conn, user.id, { allowLegacyImport: false });
+      return user.id;
+    }
+
+    const user = await this.getOrCreateUserByUsername(conn, normalizedScope.username ?? DEFAULT_ACTIVE_USER);
+    await this.ensureStoreForUser(conn, user.id, { allowLegacyImport: false });
+    return user.id;
   }
 
   private async loadLegacyStoreFromDisk(): Promise<StrategyStoreData | null> {
@@ -352,73 +442,55 @@ export class StrategyRepository {
     );
   }
 
-  private async initializeStoreForActiveUser(conn: PoolConnection): Promise<void> {
-    const userId = this.requireActiveUserId();
-    let store = await this.readStoreForUser(conn, userId);
-    if (!store) {
-      store = (await this.loadLegacyStoreFromDisk()) ?? cloneStore(DEFAULT_STORE);
-    }
-
-    const nowIso = new Date().toISOString();
-    const presetStrategies = buildPresetStrategies(nowIso);
-    if (store.strategies.length === 0) {
-      store.strategies = presetStrategies.map((strategy) => ({
-        ...strategy,
-        nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
-      }));
-    } else {
-      const existingById = new Set(store.strategies.map((strategy) => strategy.id));
-      const missingPresets = presetStrategies
-        .filter((strategy) => !existingById.has(strategy.id))
-        .map((strategy) => ({
-          ...strategy,
-          nextRunAt: createNextRunAt(nowIso, strategy.scheduleInterval),
-        }));
-      if (missingPresets.length > 0) {
-        store.strategies.push(...missingPresets);
-      }
-    }
-
-    store.demoAccount = normalizeDemoAccountSettings(store.demoAccount);
-    await this.writeStoreForUser(conn, userId, store);
-  }
-
   private async initialize(): Promise<void> {
     await this.withConnection(async (conn) => {
       await this.ensureSchema(conn);
       await this.seedDummyUsers(conn);
       await this.resolveActiveUser(conn);
-      await this.initializeStoreForActiveUser(conn);
+      await this.ensureStoreForUser(conn, this.requireActiveUserId(), { allowLegacyImport: true });
     });
 
     this.initialized = true;
-    await this.markInterruptedRunsAsFailed();
+    const scopes = await this.listUserScopes();
+    for (const scope of scopes) {
+      await this.markInterruptedRunsAsFailed(scope);
+    }
   }
 
-  private async readStore(): Promise<StrategyStoreData> {
+  private async readStore(scope?: StrategyUserScope): Promise<StrategyStoreData> {
     return this.withConnection(async (conn) => {
-      const store = await this.readStoreForUser(conn, this.requireActiveUserId());
+      const userId = await this.resolveUserId(conn, scope);
+      const store = await this.readStoreForUser(conn, userId);
       return store ?? cloneStore(DEFAULT_STORE);
     });
   }
 
-  private async writeStore(store: StrategyStoreData): Promise<void> {
-    await this.withConnection((conn) => this.writeStoreForUser(conn, this.requireActiveUserId(), store));
+  private async writeStore(store: StrategyStoreData, scope?: StrategyUserScope): Promise<void> {
+    await this.withConnection(async (conn) => {
+      const userId = await this.resolveUserId(conn, scope);
+      await this.writeStoreForUser(conn, userId, store);
+    });
   }
 
-  private async readAfterWrites<T>(reader: (store: StrategyStoreData) => T | Promise<T>): Promise<T> {
+  private async readAfterWrites<T>(
+    scope: StrategyUserScope | undefined,
+    reader: (store: StrategyStoreData) => T | Promise<T>
+  ): Promise<T> {
     await this.init();
     await this.writeQueue;
-    const store = await this.readStore();
+    const store = await this.readStore(scope);
     return reader(store);
   }
 
-  private mutate<T>(mutator: (store: StrategyStoreData) => T | Promise<T>): Promise<T> {
+  private mutate<T>(
+    scope: StrategyUserScope | undefined,
+    mutator: (store: StrategyStoreData) => T | Promise<T>
+  ): Promise<T> {
     const action = async () => {
       await this.init();
-      const store = await this.readStore();
+      const store = await this.readStore(scope);
       const result = await mutator(store);
-      await this.writeStore(store);
+      await this.writeStore(store, scope);
       return result;
     };
 
@@ -431,8 +503,8 @@ export class StrategyRepository {
     return next;
   }
 
-  async markInterruptedRunsAsFailed(): Promise<void> {
-    await this.mutate((store) => {
+  async markInterruptedRunsAsFailed(scope?: StrategyUserScope): Promise<void> {
+    await this.mutate(scope, (store) => {
       const nowIso = new Date().toISOString();
       store.strategyRuns = store.strategyRuns.map((run) => {
         if (run.status !== "running") return run;
@@ -447,16 +519,30 @@ export class StrategyRepository {
     });
   }
 
-  async listStrategies(): Promise<StrategyConfig[]> {
-    return this.readAfterWrites((store) => orderByIsoDescending(store.strategies));
+  async listUserScopes(): Promise<StrategyUserScope[]> {
+    await this.init();
+    return this.withConnection(async (conn) => {
+      const [rows] = await conn.query<UserRow[]>(
+        `
+          SELECT id, username
+          FROM agent_users
+          ORDER BY id ASC
+        `
+      );
+      return rows.map((row) => ({ userId: row.id, username: row.username }));
+    });
   }
 
-  async getStrategy(strategyId: string): Promise<StrategyConfig | null> {
-    return this.readAfterWrites((store) => store.strategies.find((strategy) => strategy.id === strategyId) ?? null);
+  async listStrategies(scope?: StrategyUserScope): Promise<StrategyConfig[]> {
+    return this.readAfterWrites(scope, (store) => orderByIsoDescending(store.strategies));
   }
 
-  async saveStrategy(strategy: StrategyConfig): Promise<StrategyConfig> {
-    return this.mutate((store) => {
+  async getStrategy(strategyId: string, scope?: StrategyUserScope): Promise<StrategyConfig | null> {
+    return this.readAfterWrites(scope, (store) => store.strategies.find((strategy) => strategy.id === strategyId) ?? null);
+  }
+
+  async saveStrategy(strategy: StrategyConfig, scope?: StrategyUserScope): Promise<StrategyConfig> {
+    return this.mutate(scope, (store) => {
       const index = store.strategies.findIndex((item) => item.id === strategy.id);
       if (index >= 0) {
         store.strategies[index] = strategy;
@@ -468,8 +554,8 @@ export class StrategyRepository {
     });
   }
 
-  async deleteStrategy(strategyId: string): Promise<boolean> {
-    return this.mutate((store) => {
+  async deleteStrategy(strategyId: string, scope?: StrategyUserScope): Promise<boolean> {
+    return this.mutate(scope, (store) => {
       const before = store.strategies.length;
       store.strategies = store.strategies.filter((strategy) => strategy.id !== strategyId);
       const removed = store.strategies.length < before;
@@ -491,8 +577,12 @@ export class StrategyRepository {
     });
   }
 
-  async setStrategyEnabled(strategyId: string, isEnabled: boolean): Promise<StrategyConfig | null> {
-    return this.mutate((store) => {
+  async setStrategyEnabled(
+    strategyId: string,
+    isEnabled: boolean,
+    scope?: StrategyUserScope
+  ): Promise<StrategyConfig | null> {
+    return this.mutate(scope, (store) => {
       const strategy = store.strategies.find((item) => item.id === strategyId);
       if (!strategy) return null;
 
@@ -504,8 +594,12 @@ export class StrategyRepository {
     });
   }
 
-  async scheduleStrategy(strategyId: string, scheduleInterval: string): Promise<StrategyConfig | null> {
-    return this.mutate((store) => {
+  async scheduleStrategy(
+    strategyId: string,
+    scheduleInterval: string,
+    scope?: StrategyUserScope
+  ): Promise<StrategyConfig | null> {
+    return this.mutate(scope, (store) => {
       const strategy = store.strategies.find((item) => item.id === strategyId);
       if (!strategy) return null;
 
@@ -517,8 +611,8 @@ export class StrategyRepository {
     });
   }
 
-  async updateStrategyRunTimestamps(strategyId: string, completedAtIso: string): Promise<void> {
-    await this.mutate((store) => {
+  async updateStrategyRunTimestamps(strategyId: string, completedAtIso: string, scope?: StrategyUserScope): Promise<void> {
+    await this.mutate(scope, (store) => {
       const strategy = store.strategies.find((item) => item.id === strategyId);
       if (!strategy) return;
 
@@ -528,8 +622,8 @@ export class StrategyRepository {
     });
   }
 
-  async listDueStrategies(nowIso: string): Promise<StrategyConfig[]> {
-    return this.readAfterWrites((store) =>
+  async listDueStrategies(nowIso: string, scope?: StrategyUserScope): Promise<StrategyConfig[]> {
+    return this.readAfterWrites(scope, (store) =>
       store.strategies
         .filter((strategy) => {
           if (!strategy.isEnabled) return false;
@@ -545,12 +639,12 @@ export class StrategyRepository {
     );
   }
 
-  async getDemoAccountSettings(): Promise<DemoAccountSettings> {
-    return this.readAfterWrites((store) => ({ ...store.demoAccount }));
+  async getDemoAccountSettings(scope?: StrategyUserScope): Promise<DemoAccountSettings> {
+    return this.readAfterWrites(scope, (store) => ({ ...store.demoAccount }));
   }
 
-  async setDemoAccountBalance(balance: number): Promise<DemoAccountSettings> {
-    return this.mutate((store) => {
+  async setDemoAccountBalance(balance: number, scope?: StrategyUserScope): Promise<DemoAccountSettings> {
+    return this.mutate(scope, (store) => {
       const safeBalance = Number.isFinite(balance) && balance > 0 ? balance : store.demoAccount.balance;
       store.demoAccount = {
         balance: safeBalance,
@@ -567,8 +661,8 @@ export class StrategyRepository {
     mode: StrategyRun["mode"];
     trigger: StrategyRun["trigger"];
     inputSnapshot?: StrategyRun["inputSnapshot"];
-  }): Promise<StrategyRun> {
-    return this.mutate((store) => {
+  }, scope?: StrategyUserScope): Promise<StrategyRun> {
+    return this.mutate(scope, (store) => {
       const run: StrategyRun = {
         id: randomUUID(),
         strategyId: input.strategyId,
@@ -586,8 +680,8 @@ export class StrategyRepository {
     });
   }
 
-  async updateStrategyRun(runId: string, patch: Partial<StrategyRun>): Promise<StrategyRun | null> {
-    return this.mutate((store) => {
+  async updateStrategyRun(runId: string, patch: Partial<StrategyRun>, scope?: StrategyUserScope): Promise<StrategyRun | null> {
+    return this.mutate(scope, (store) => {
       const run = store.strategyRuns.find((item) => item.id === runId);
       if (!run) return null;
 
@@ -596,20 +690,24 @@ export class StrategyRepository {
     });
   }
 
-  async listStrategyRuns(limit = 200, accountType?: StrategyRun["accountType"]): Promise<StrategyRun[]> {
-    return this.readAfterWrites((store) =>
+  async listStrategyRuns(
+    limit = 200,
+    accountType?: StrategyRun["accountType"],
+    scope?: StrategyUserScope
+  ): Promise<StrategyRun[]> {
+    return this.readAfterWrites(scope, (store) =>
       orderByIsoDescending(store.strategyRuns)
         .filter((run) => (accountType ? run.accountType === accountType : true))
         .slice(0, limit)
     );
   }
 
-  async getStrategyRun(runId: string): Promise<StrategyRun | null> {
-    return this.readAfterWrites((store) => store.strategyRuns.find((run) => run.id === runId) ?? null);
+  async getStrategyRun(runId: string, scope?: StrategyUserScope): Promise<StrategyRun | null> {
+    return this.readAfterWrites(scope, (store) => store.strategyRuns.find((run) => run.id === runId) ?? null);
   }
 
-  async saveExecutionPlan(plan: ExecutionPlan): Promise<ExecutionPlan> {
-    return this.mutate((store) => {
+  async saveExecutionPlan(plan: ExecutionPlan, scope?: StrategyUserScope): Promise<ExecutionPlan> {
+    return this.mutate(scope, (store) => {
       const index = store.executionPlans.findIndex((item) => item.id === plan.id);
       if (index >= 0) {
         store.executionPlans[index] = plan;
@@ -621,15 +719,16 @@ export class StrategyRepository {
     });
   }
 
-  async getExecutionPlan(planId: string): Promise<ExecutionPlan | null> {
-    return this.readAfterWrites((store) => store.executionPlans.find((item) => item.id === planId) ?? null);
+  async getExecutionPlan(planId: string, scope?: StrategyUserScope): Promise<ExecutionPlan | null> {
+    return this.readAfterWrites(scope, (store) => store.executionPlans.find((item) => item.id === planId) ?? null);
   }
 
   async getLatestExecutionPlanByStrategy(
     strategyId: string,
-    accountType?: ExecutionPlan["accountType"]
+    accountType?: ExecutionPlan["accountType"],
+    scope?: StrategyUserScope
   ): Promise<ExecutionPlan | null> {
-    return this.readAfterWrites((store) => {
+    return this.readAfterWrites(scope, (store) => {
       const plans = store.executionPlans
         .filter((plan) => plan.strategyId === strategyId && (accountType ? plan.accountType === accountType : true))
         .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
@@ -643,8 +742,8 @@ export class StrategyRepository {
     endDate: string;
     initialCapital: number;
     status?: BacktestRunStatus;
-  }): Promise<BacktestRun> {
-    return this.mutate((store) => {
+  }, scope?: StrategyUserScope): Promise<BacktestRun> {
+    return this.mutate(scope, (store) => {
       const run: BacktestRun = {
         id: randomUUID(),
         strategyId: input.strategyId,
@@ -660,8 +759,8 @@ export class StrategyRepository {
     });
   }
 
-  async updateBacktestRun(runId: string, patch: Partial<BacktestRun>): Promise<BacktestRun | null> {
-    return this.mutate((store) => {
+  async updateBacktestRun(runId: string, patch: Partial<BacktestRun>, scope?: StrategyUserScope): Promise<BacktestRun | null> {
+    return this.mutate(scope, (store) => {
       const run = store.backtestRuns.find((item) => item.id === runId);
       if (!run) return null;
 
@@ -670,24 +769,24 @@ export class StrategyRepository {
     });
   }
 
-  async listBacktestRuns(limit = 100): Promise<BacktestRun[]> {
-    return this.readAfterWrites((store) => orderByIsoDescending(store.backtestRuns).slice(0, limit));
+  async listBacktestRuns(limit = 100, scope?: StrategyUserScope): Promise<BacktestRun[]> {
+    return this.readAfterWrites(scope, (store) => orderByIsoDescending(store.backtestRuns).slice(0, limit));
   }
 
-  async getBacktestRun(runId: string): Promise<BacktestRun | null> {
-    return this.readAfterWrites((store) => store.backtestRuns.find((item) => item.id === runId) ?? null);
+  async getBacktestRun(runId: string, scope?: StrategyUserScope): Promise<BacktestRun | null> {
+    return this.readAfterWrites(scope, (store) => store.backtestRuns.find((item) => item.id === runId) ?? null);
   }
 
-  async appendBacktestSteps(steps: BacktestStep[]): Promise<void> {
+  async appendBacktestSteps(steps: BacktestStep[], scope?: StrategyUserScope): Promise<void> {
     if (steps.length === 0) return;
 
-    await this.mutate((store) => {
+    await this.mutate(scope, (store) => {
       store.backtestSteps.push(...steps);
     });
   }
 
-  async listBacktestSteps(backtestRunId: string): Promise<BacktestStep[]> {
-    return this.readAfterWrites((store) =>
+  async listBacktestSteps(backtestRunId: string, scope?: StrategyUserScope): Promise<BacktestStep[]> {
+    return this.readAfterWrites(scope, (store) =>
       store.backtestSteps
         .filter((step) => step.backtestRunId === backtestRunId)
         .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
