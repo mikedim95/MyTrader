@@ -268,7 +268,22 @@ export class StrategyRepository {
     return this.mutate((store) => {
       const before = store.strategies.length;
       store.strategies = store.strategies.filter((strategy) => strategy.id !== strategyId);
-      return store.strategies.length < before;
+      const removed = store.strategies.length < before;
+      if (!removed) {
+        return false;
+      }
+
+      store.strategyRuns = store.strategyRuns.filter((run) => run.strategyId !== strategyId);
+      store.executionPlans = store.executionPlans.filter((plan) => plan.strategyId !== strategyId);
+
+      const removedBacktestRunIds = new Set(
+        store.backtestRuns.filter((run) => run.strategyId === strategyId).map((run) => run.id)
+      );
+      store.backtestRuns = store.backtestRuns.filter((run) => run.strategyId !== strategyId);
+
+      store.backtestSteps = store.backtestSteps.filter((step) => !removedBacktestRunIds.has(step.backtestRunId));
+
+      return true;
     });
   }
 

@@ -49,4 +49,6 @@ Images pushed to Docker Hub:
 ### Notes
 
 - Docker builds use the repository root as context so shared ignore rules in `.dockerignore` are applied consistently.
+- Images are pushed to **two separate Docker Hub repositories** (not a single `mytrader` repo): `mytrader-backend` and `mytrader-frontend`.
+- The workflow now publishes **ARM64-only** images (`linux/arm64`), which matches Raspberry Pi 3B deployment targets.
 - The frontend container ships an Nginx SPA fallback (`try_files ... /index.html`) so direct deep-link routes work after deployment.
