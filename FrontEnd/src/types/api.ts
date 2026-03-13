@@ -11,6 +11,7 @@ export interface Asset {
   allocation: number;
   targetAllocation: number;
   sparkline: number[];
+  sparklinePeriod: "24h";
 }
 
 export interface Order {
@@ -334,9 +335,17 @@ export type PortfolioAccountType = "real" | "demo";
 export type StrategyRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type BacktestRunStatus = "pending" | "running" | "completed" | "failed";
 
+export interface DemoAccountHolding {
+  symbol: string;
+  quantity: number;
+  targetAllocation: number;
+}
+
 export interface DemoAccountSettings {
   balance: number;
   updatedAt: string;
+  seededAt?: string;
+  holdings: DemoAccountHolding[];
 }
 
 export type AllocationMap = Record<string, number>;

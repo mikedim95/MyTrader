@@ -169,10 +169,8 @@ export async function getDemoPortfolioState(
 ): Promise<PortfolioState> {
   const normalizedBase = normalizeSymbol(baseCurrency || "USDC");
   const demoCapital = getResolvedDemoCapital(options?.demoCapital, options?.demoAccount);
-  const holdings =
-    normalizeHoldings(options?.demoAccount?.holdings).length > 0
-      ? normalizeHoldings(options?.demoAccount?.holdings)
-      : await createDemoAccountHoldings(normalizedBase, demoCapital);
+  const savedHoldings = normalizeHoldings(options?.demoAccount?.holdings);
+  const holdings = savedHoldings.length > 0 ? savedHoldings : await createDemoAccountHoldings(normalizedBase, demoCapital);
   const symbols = Array.from(new Set(holdings.map((holding) => holding.symbol)));
 
   const tickerEntries = await Promise.all(

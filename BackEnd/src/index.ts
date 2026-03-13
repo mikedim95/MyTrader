@@ -34,7 +34,8 @@ import { StrategyRepository } from "./strategy/strategy-repository.js";
 import { StrategyRunner } from "./strategy/strategy-runner.js";
 import { StrategyScheduler } from "./strategy/strategy-scheduler.js";
 import { createStrategyRouter } from "./strategy/strategy-api.js";
-import { resolveStrategyUserScope, StrategyUserScope } from "./strategy/strategy-user-scope.js";
+import { resolveStrategyUserScope } from "./strategy/strategy-user-scope.js";
+import type { StrategyUserScope } from "./strategy/strategy-user-scope.js";
 
 const app = express();
 

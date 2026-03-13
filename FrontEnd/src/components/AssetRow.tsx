@@ -9,13 +9,14 @@ interface SparklineProps {
 }
 
 export function Sparkline({ data, positive, width = 80, height = 28 }: SparklineProps) {
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  const safeData = data.length >= 2 ? data : [data[0] ?? 0, data[0] ?? 0];
+  const min = Math.min(...safeData);
+  const max = Math.max(...safeData);
   const range = max - min || 1;
 
-  const points = data
+  const points = safeData
     .map((v, i) => {
-      const x = (i / (data.length - 1)) * width;
+      const x = (i / (safeData.length - 1)) * width;
       const y = height - ((v - min) / range) * height;
       return `${x},${y}`;
     })
@@ -42,14 +43,18 @@ interface AssetRowProps {
 
 export function AssetRow({ asset, onClick }: AssetRowProps) {
   const positive = asset.change24h >= 0;
+  const trendPositive = (asset.sparkline[asset.sparkline.length - 1] ?? asset.value) >= (asset.sparkline[0] ?? asset.value);
+  const isInteractive = Boolean(onClick);
   const fmt = (v: number) => v.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   return (
     <tr
       onClick={onClick}
       className={cn(
-        "border-b border-border cursor-pointer transition-colors group",
-        positive ? "hover:animate-pulse-positive" : "hover:animate-pulse-negative"
+        "border-b border-border transition-colors group",
+        isInteractive ? "cursor-pointer" : "cursor-default",
+        isInteractive && trendPositive ? "hover:animate-pulse-positive" : null,
+        isInteractive && !trendPositive ? "hover:animate-pulse-negative" : null
       )}
     >
       <td className="py-3 px-4">
@@ -74,7 +79,7 @@ export function AssetRow({ asset, onClick }: AssetRowProps) {
       </td>
       <td className="py-3 px-4">
         <div className="flex justify-end">
-          <Sparkline data={asset.sparkline} positive={positive} />
+          <Sparkline data={asset.sparkline} positive={trendPositive} />
         </div>
       </td>
     </tr>

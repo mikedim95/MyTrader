@@ -946,8 +946,8 @@ export class StrategyRepository {
     });
   }
 
-  async deleteStrategy(strategyId: string): Promise<boolean> {
-    return this.mutate((store) => {
+  async deleteStrategy(strategyId: string, scope?: StrategyUserScope): Promise<boolean> {
+    return this.mutate(scope, (store) => {
       const before = store.strategies.length;
       store.strategies = store.strategies.filter((strategy) => strategy.id !== strategyId);
       const removed = store.strategies.length < before;
@@ -969,8 +969,8 @@ export class StrategyRepository {
     });
   }
 
-  async setStrategyEnabled(strategyId: string, isEnabled: boolean): Promise<StrategyConfig | null> {
-    return this.mutate((store) => {
+  async setStrategyEnabled(strategyId: string, isEnabled: boolean, scope?: StrategyUserScope): Promise<StrategyConfig | null> {
+    return this.mutate(scope, (store) => {
       const strategy = store.strategies.find((item) => item.id === strategyId);
       if (!strategy) return null;
 
@@ -1057,7 +1057,6 @@ export class StrategyRepository {
       const timestamp = new Date().toISOString();
       store.demoAccount = {
         ...store.demoAccount,
-        updatedAt: timestamp,
         seededAt: timestamp,
         holdings: normalizedHoldings,
       };

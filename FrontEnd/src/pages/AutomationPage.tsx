@@ -1184,38 +1184,6 @@ export function AutomationPage() {
     mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
     onSuccess: async (result) => {
       setErrorMessage("");
-      setMessage(`Created strategy ${result.strategy.name}.`);
-      setSelectedStrategyId(result.strategy.id);
-      setDraft(strategyToDraft(result.strategy));
-      setDraftStrategyId(result.strategy.id);
-      setDraftDirty(false);
-      setEditorMode("edit");
-      await invalidateAll();
-    },
-    onError: (error) => {
-      setMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to create strategy.");
-    },
-  });
-
-  const deleteStrategyMutation = useMutation({
-    mutationFn: (strategyId: string) => backendApi.deleteStrategy(strategyId),
-    onSuccess: async () => {
-      setErrorMessage("");
-      setMessage("Strategy deleted.");
-      setSelectedStrategyId("");
-      await invalidateAll();
-    },
-    onError: (error) => {
-      setMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to delete strategy.");
-    },
-  });
-
-  const backtestMutation = useMutation({
-    mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
-    onSuccess: async (result) => {
-      setErrorMessage("");
       setMessage(`Backtest ${result.backtestRun.id} started.`);
       await invalidateAll();
     },
@@ -1436,14 +1404,6 @@ export function AutomationPage() {
     setDraftStrategyId("");
     setDraftDirty(false);
     setShowAdvancedOptions(false);
-    setIsEditorModalOpen(true);
-  };
-
-  const openCreateStrategyEditor = (): void => {
-    setEditorMode("create");
-    setDraft(createUsableStrategyDraft(readOnlyStrategies.map((strategy) => strategy.id)));
-    setDraftStrategyId("");
-    setDraftDirty(false);
     setIsEditorModalOpen(true);
   };
 
