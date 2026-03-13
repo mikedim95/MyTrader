@@ -7,9 +7,18 @@ import type {
   ConnectionStatus,
   DemoAccountSettingsResponse,
   CreateBacktestResponse,
+  CreateMinerResponse,
   DashboardResponse,
   ExecutionPlanResponse,
+  FleetLiveResponse,
+  FleetOverviewResponse,
   MiningOverviewResponse,
+  MinerCommandResponse,
+  MinerDetailResponse,
+  MinerHistoryResponse,
+  MinerLiveResponse,
+  MinerPoolsResponse,
+  MinersResponse,
   NicehashOverviewResponse,
   OrdersResponse,
   PortfolioAccountType,
@@ -21,6 +30,7 @@ import type {
   StrategyRunsResponse,
   StrategyStateResponse,
   StrategyValidationResponse,
+  VerifyMinerDraftResponse,
 } from "@/types/api";
 import { getStoredSession } from "@/lib/session";
 
@@ -140,6 +150,71 @@ export const backendApi = {
   getOrders: () => apiRequest<OrdersResponse>("/api/orders"),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),
   getNicehashOverview: () => apiRequest<NicehashOverviewResponse>("/api/mining/nicehash"),
+  verifyMinerDraft: (body: { name: string; ip: string; password: string }) =>
+    apiRequest<VerifyMinerDraftResponse>("/api/miners/verify-draft", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createMiner: (body: { name: string; ip: string; password: string }) =>
+    apiRequest<CreateMinerResponse>("/api/miners", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getMiners: () => apiRequest<MinersResponse>("/api/miners"),
+  getMinerDetails: (minerId: number) => apiRequest<MinerDetailResponse>(`/api/miners/${minerId}`),
+  updateMiner: (minerId: number, body: { name?: string; ip?: string; password?: string; isEnabled?: boolean }) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  verifyMiner: (minerId: number) =>
+    apiRequest<{ verification: VerifyMinerDraftResponse["verification"] }>(`/api/miners/${minerId}/verify`, {
+      method: "POST",
+    }),
+  enableMiner: (minerId: number) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}/enable`, {
+      method: "POST",
+    }),
+  disableMiner: (minerId: number) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}/disable`, {
+      method: "POST",
+    }),
+  getMinerLive: (minerId: number) => apiRequest<MinerLiveResponse>(`/api/miners/${minerId}/live`),
+  getMinerHistory: (minerId: number, limit = 120) =>
+    apiRequest<MinerHistoryResponse>(withQuery(`/api/miners/${minerId}/history`, { limit: String(limit) })),
+  getMinerPools: (minerId: number) => apiRequest<MinerPoolsResponse>(`/api/miners/${minerId}/pools`),
+  getFleetLive: () => apiRequest<FleetLiveResponse>("/api/fleet/live"),
+  getFleetOverview: () => apiRequest<FleetOverviewResponse>("/api/fleet/overview"),
+  restartMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/restart`, {
+      method: "POST",
+    }),
+  rebootMiner: (minerId: number, after = 3) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/reboot`, {
+      method: "POST",
+      body: JSON.stringify({ after }),
+    }),
+  startMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/start`, {
+      method: "POST",
+    }),
+  stopMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/stop`, {
+      method: "POST",
+    }),
+  pauseMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/pause`, {
+      method: "POST",
+    }),
+  resumeMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/resume`, {
+      method: "POST",
+    }),
+  switchMinerPool: (minerId: number, poolId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/switch-pool`, {
+      method: "POST",
+      body: JSON.stringify({ poolId }),
+    }),
   getBinanceConnection: () => apiRequest<ConnectionStatus>("/api/binance/connection"),
   connectBinance: (body: ConnectRequest) =>
     apiRequest<ConnectionStatus>("/api/binance/connection", {

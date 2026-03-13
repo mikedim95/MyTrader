@@ -62,6 +62,58 @@ export function useNicehashOverview() {
   });
 }
 
+export function useFleetOverview() {
+  return useQuery({
+    queryKey: ["fleet-overview"],
+    queryFn: backendApi.getFleetOverview,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
+export function useFleetLive() {
+  return useQuery({
+    queryKey: ["fleet-live"],
+    queryFn: backendApi.getFleetLive,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
+export function useMiners() {
+  return useQuery({
+    queryKey: ["miners-list"],
+    queryFn: backendApi.getMiners,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
+export function useMinerDetails(minerId: number | undefined) {
+  return useQuery({
+    queryKey: ["miner-details", minerId],
+    queryFn: () => backendApi.getMinerDetails(minerId ?? 0),
+    enabled: typeof minerId === "number" && minerId > 0,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
+export function useMinerHistory(minerId: number | undefined, limit = 120) {
+  return useQuery({
+    queryKey: ["miner-history", minerId, limit],
+    queryFn: () => backendApi.getMinerHistory(minerId ?? 0, limit),
+    enabled: typeof minerId === "number" && minerId > 0,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
 export function useStrategies() {
   return useQuery({
     queryKey: ["strategies"],

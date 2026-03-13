@@ -1,97 +1,109 @@
-import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { MoreHorizontal } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { MinerStatusBadge } from "./MinerStatusBadge";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
-import { LayoutGrid, List, Eye } from "lucide-react";
-import type { Miner } from "@/data/minerMockData";
+import type { MinerEntity, MinerLiveData } from "@/types/api";
 
-interface Props {
-  miners: Miner[];
-  onSelect: (m: Miner) => void;
-  selected: Set<string>;
-  onToggleSelect: (id: string) => void;
-  onToggleAll: () => void;
+interface MinerTableProps {
+  miners: MinerEntity[];
+  fleetLive: MinerLiveData[];
+  onOpen: (minerId: number) => void;
+  onVerify: (minerId: number) => void;
+  onCommand: (minerId: number, action: "restart" | "reboot" | "start" | "stop" | "pause" | "resume") => void;
 }
 
-export function MinerTable({ miners, onSelect, selected, onToggleSelect, onToggleAll }: Props) {
-  const [view, setView] = useState<"table" | "grid">("table");
+function formatLastSeen(value: string | null): string {
+  if (!value) return "--";
+  return new Date(value).toLocaleString();
+}
 
-  if (view === "grid") {
-    return (
-      <div>
-        <div className="flex justify-end mb-3 gap-1">
-          <button onClick={() => setView("table")} className="p-1.5 rounded text-muted-foreground hover:text-foreground"><List className="h-4 w-4" /></button>
-          <button onClick={() => setView("grid")} className="p-1.5 rounded bg-secondary text-foreground"><LayoutGrid className="h-4 w-4" /></button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {miners.map(m => (
-            <div key={m.id} onClick={() => onSelect(m)} className="rounded-lg border border-border bg-card p-4 hover:bg-secondary/50 cursor-pointer transition-colors">
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-mono text-sm font-semibold text-foreground">{m.name}</span>
-                <MinerStatusBadge status={m.status} />
-              </div>
-              <div className="text-xs font-mono text-muted-foreground mb-2">{m.model}</div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div><div className="text-[10px] font-mono text-muted-foreground">Hashrate</div><div className="text-sm font-mono text-foreground">{m.hashrate} {m.hashrateUnit}</div></div>
-                <div><div className="text-[10px] font-mono text-muted-foreground">Power</div><div className="text-sm font-mono text-foreground">{m.powerDraw}W</div></div>
-                <div><div className="text-[10px] font-mono text-muted-foreground">Temp</div><div className="text-sm font-mono text-foreground">{Math.max(...m.chipTemps)}°C</div></div>
-              </div>
-              <div className="flex items-center justify-between mt-3 text-[10px] font-mono text-muted-foreground">
-                <span>{m.ip}</span>
-                <span>{m.pool}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
+function getLiveMap(fleetLive: MinerLiveData[]): Map<number, MinerLiveData> {
+  return new Map(fleetLive.map((miner) => [miner.minerId, miner]));
+}
+
+export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: MinerTableProps) {
+  const liveMap = getLiveMap(fleetLive);
 
   return (
-    <div>
-      <div className="flex justify-end mb-3 gap-1">
-        <button onClick={() => setView("table")} className="p-1.5 rounded bg-secondary text-foreground"><List className="h-4 w-4" /></button>
-        <button onClick={() => setView("grid")} className="p-1.5 rounded text-muted-foreground hover:text-foreground"><LayoutGrid className="h-4 w-4" /></button>
-      </div>
-      <div className="rounded-lg border border-border overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-secondary/30">
-              <TableHead className="w-10"><Checkbox checked={selected.size === miners.length && miners.length > 0} onCheckedChange={onToggleAll} /></TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider">Miner</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider">Model</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider">Status</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Hashrate</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Temp</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Fan</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Power</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Efficiency</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider">Pool</TableHead>
-              <TableHead className="font-mono text-[10px] uppercase tracking-wider">Uptime</TableHead>
-              <TableHead className="w-10"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {miners.map(m => (
-              <TableRow key={m.id} className="hover:bg-secondary/30 cursor-pointer transition-colors" onClick={() => onSelect(m)}>
-                <TableCell onClick={e => e.stopPropagation()}><Checkbox checked={selected.has(m.id)} onCheckedChange={() => onToggleSelect(m.id)} /></TableCell>
-                <TableCell className="font-mono text-xs font-semibold text-foreground">{m.name}<div className="text-[10px] text-muted-foreground">{m.ip}</div></TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{m.model}</TableCell>
-                <TableCell><MinerStatusBadge status={m.status} /></TableCell>
-                <TableCell className={cn("font-mono text-xs text-right", m.hashrate > 0 ? "text-foreground" : "text-muted-foreground")}>{m.hashrate > 0 ? `${m.hashrate} ${m.hashrateUnit}` : "—"}</TableCell>
-                <TableCell className={cn("font-mono text-xs text-right", Math.max(...m.chipTemps) > 90 ? "text-negative" : Math.max(...m.chipTemps) > 80 ? "text-[hsl(45,100%,50%)]" : "text-foreground")}>{Math.max(...m.chipTemps) > 0 ? `${Math.max(...m.chipTemps)}°C` : "—"}</TableCell>
-                <TableCell className="font-mono text-xs text-right text-muted-foreground">{Math.max(...m.fanSpeeds) > 0 ? `${Math.max(...m.fanSpeeds)} RPM` : "—"}</TableCell>
-                <TableCell className="font-mono text-xs text-right text-foreground">{m.powerDraw > 0 ? `${m.powerDraw}W` : "—"}</TableCell>
-                <TableCell className="font-mono text-xs text-right text-muted-foreground">{m.efficiency > 0 ? `${m.efficiency} J/TH` : "—"}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{m.pool}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{m.uptime || "—"}</TableCell>
-                <TableCell><Eye className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" /></TableCell>
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-secondary/30">
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Miner</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">IP</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Status</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Rate</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Max Board</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Hotspot</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Fan</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Preset</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Pool</TableHead>
+            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Last Seen</TableHead>
+            <TableHead className="w-12" />
+          </TableRow>
+        </TableHeader>
+
+        <TableBody>
+          {miners.map((miner) => {
+            const live = liveMap.get(miner.id);
+            const maxBoard = live?.boardTemps.length ? Math.max(...live.boardTemps) : null;
+            const maxHotspot = live?.hotspotTemps.length ? Math.max(...live.hotspotTemps) : null;
+            const activePool = live?.pools.find((pool, index) => live.poolActiveIndex === index) ?? live?.pools[0];
+
+            return (
+              <TableRow key={miner.id} className="cursor-pointer" onClick={() => onOpen(miner.id)}>
+                <TableCell>
+                  <div className="font-mono text-sm font-semibold text-foreground">{miner.name}</div>
+                  <div className="mt-1 text-[11px] font-mono text-muted-foreground">
+                    {miner.model ?? "Unknown model"}
+                    {miner.firmware ? ` | ${miner.firmware}` : ""}
+                  </div>
+                </TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{miner.ip}</TableCell>
+                <TableCell>
+                  <MinerStatusBadge online={live?.online ?? false} minerState={live?.minerState} />
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs text-foreground">
+                  {typeof live?.totalRateThs === "number" ? `${live.totalRateThs.toFixed(2)} TH/s` : "--"}
+                </TableCell>
+                <TableCell className="text-right font-mono text-xs text-foreground">{maxBoard !== null ? `${maxBoard}C` : "--"}</TableCell>
+                <TableCell className="text-right font-mono text-xs text-foreground">{maxHotspot !== null ? `${maxHotspot}C` : "--"}</TableCell>
+                <TableCell className="text-right font-mono text-xs text-foreground">
+                  {typeof live?.fanPwm === "number" ? `${live.fanPwm}%` : "--"}
+                </TableCell>
+                <TableCell className="font-mono text-xs text-foreground">{live?.presetPretty ?? live?.presetName ?? "--"}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{activePool?.url ?? "--"}</TableCell>
+                <TableCell className="font-mono text-[11px] text-muted-foreground">{formatLastSeen(live?.lastSeenAt ?? miner.lastSeenAt)}</TableCell>
+                <TableCell onClick={(event) => event.stopPropagation()}>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onOpen(miner.id)}>Open details</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onVerify(miner.id)}>Verify</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "restart")}>Restart mining</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "reboot")}>Reboot</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "stop")}>Stop</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "start")}>Start</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "pause")}>Pause</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onCommand(miner.id, "resume")}>Resume</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            );
+          })}
+        </TableBody>
+      </Table>
     </div>
   );
 }

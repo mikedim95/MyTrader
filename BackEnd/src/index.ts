@@ -8,6 +8,16 @@ import {
   validateCredentials,
 } from "./binanceClient.js";
 import { getMiningOverviewData, getNicehashOverviewData } from "./miningService.js";
+import { createMinerRouter } from "./miners/miner-api.js";
+import { MinerAuthService } from "./miners/miner-auth-service.js";
+import { MinerCgminerClient } from "./miners/miner-cgminer-client.js";
+import { MinerCommandService } from "./miners/miner-command-service.js";
+import { MinerCryptoService } from "./miners/miner-crypto-service.js";
+import { MinerHttpClient } from "./miners/miner-http-client.js";
+import { MinerPollingService } from "./miners/miner-polling-service.js";
+import { MinerReadService } from "./miners/miner-read-service.js";
+import { MinerRepository as FleetMinerRepository } from "./miners/miner-repository.js";
+import { MinerVerifyService } from "./miners/miner-verify-service.js";
 import { getDashboardData, getOrdersData } from "./portfolioService.js";
 import type { DashboardResponse } from "./types.js";
 import { BacktestEngine } from "./strategy/backtest-engine.js";
@@ -27,11 +37,22 @@ const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:8080")
   .filter(Boolean);
 const rawSchedulerPollMs = Number(process.env.STRATEGY_SCHEDULER_POLL_MS ?? 15_000);
 const schedulerPollMs = Number.isFinite(rawSchedulerPollMs) && rawSchedulerPollMs >= 5_000 ? rawSchedulerPollMs : 15_000;
+const rawMinerPollMs = Number(process.env.MINER_POLL_MS ?? 15_000);
+const minerPollMs = Number.isFinite(rawMinerPollMs) && rawMinerPollMs >= 5_000 ? rawMinerPollMs : 15_000;
 
 const strategyRepository = new StrategyRepository(process.env.STRATEGY_STORE_PATH);
 const strategyRunner = new StrategyRunner(strategyRepository);
 const backtestEngine = new BacktestEngine(strategyRepository);
 const strategyScheduler = new StrategyScheduler(strategyRepository, strategyRunner, schedulerPollMs);
+const minerRepository = new FleetMinerRepository();
+const minerCryptoService = new MinerCryptoService();
+const minerHttpClient = new MinerHttpClient();
+const minerCgminerClient = new MinerCgminerClient();
+const minerAuthService = new MinerAuthService(minerHttpClient, minerCryptoService);
+const minerReadService = new MinerReadService(minerRepository, minerHttpClient, minerCgminerClient, minerAuthService);
+const minerVerifyService = new MinerVerifyService(minerHttpClient, minerCgminerClient);
+const minerCommandService = new MinerCommandService(minerRepository, minerHttpClient, minerAuthService, minerReadService);
+const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
 
 const DEMO_ASSET_NAMES: Record<string, string> = {
   BTC: "Bitcoin",
@@ -279,6 +300,18 @@ app.get("/api/mining/nicehash", async (_req, res) => {
 
 app.use(
   "/api",
+  createMinerRouter({
+    repository: minerRepository,
+    verifyService: minerVerifyService,
+    readService: minerReadService,
+    commandService: minerCommandService,
+    cryptoService: minerCryptoService,
+    pollingService: minerPollingService,
+  })
+);
+
+app.use(
+  "/api",
   createStrategyRouter({
     repository: strategyRepository,
     runner: strategyRunner,
@@ -300,8 +333,18 @@ strategyScheduler.start().catch((error) => {
   console.error("[strategy-scheduler] Failed to start:", error);
 });
 
+minerRepository
+  .init()
+  .then(() => {
+    minerPollingService.start();
+  })
+  .catch((error) => {
+    console.error("[miner-polling] Failed to initialize:", error);
+  });
+
 const shutdown = (): void => {
   strategyScheduler.stop();
+  minerPollingService.stop();
   server.close(() => {
     process.exit(0);
   });

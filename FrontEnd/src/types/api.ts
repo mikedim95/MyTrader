@@ -65,6 +65,181 @@ export interface SessionLoginResponse {
   status: SessionStatusResponse;
 }
 
+export interface MinerCapabilities {
+  canReadHttp: boolean;
+  canReadCgminer: boolean;
+  canUnlock: boolean;
+  canRestart: boolean;
+  canReboot: boolean;
+  canSwitchPool: boolean;
+  canReadPresets: boolean;
+}
+
+export interface MinerEntity {
+  id: number;
+  name: string;
+  ip: string;
+  apiBaseUrl: string;
+  model: string | null;
+  firmware: string | null;
+  currentPreset: string | null;
+  isEnabled: boolean;
+  verificationStatus: "pending" | "verified" | "failed";
+  lastSeenAt: string | null;
+  lastError: string | null;
+  capabilities: MinerCapabilities | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MinerPoolEntity {
+  id: number;
+  minerId: number;
+  poolIndex: number;
+  url: string;
+  username: string;
+  status: string | null;
+  isActive: boolean;
+  updatedAt: string;
+}
+
+export interface MinerPoolLive {
+  id: number;
+  url: string;
+  user: string;
+  status: string;
+  accepted?: number;
+  rejected?: number;
+  stale?: number;
+}
+
+export interface MinerLiveData {
+  minerId: number;
+  name: string;
+  ip: string;
+  online: boolean;
+  minerState: string | null;
+  unlocked: boolean;
+  presetName: string | null;
+  presetPretty: string | null;
+  presetStatus: string | null;
+  totalRateThs: number | null;
+  boardTemps: number[];
+  hotspotTemps: number[];
+  chipTempStrings: string[];
+  pcbTempStrings: string[];
+  fanPwm: number | null;
+  fanRpm: number[];
+  chainRates: number[];
+  chainStates: string[];
+  powerWatts: number | null;
+  poolActiveIndex: number | null;
+  pools: MinerPoolLive[];
+  lastSeenAt: string | null;
+  raw?: unknown;
+}
+
+export interface MinerHistoryPoint {
+  id: number;
+  createdAt: string;
+  online: boolean;
+  totalRateThs: number | null;
+  powerWatts: number | null;
+  boardTemps: number[];
+  hotspotTemps: number[];
+  fanPwm: number | null;
+}
+
+export interface MinerVerificationResult {
+  reachable: boolean;
+  httpOk: boolean;
+  cgminerOk: boolean;
+  unlockOk: boolean;
+  minerState: string | null;
+  currentPreset: string | null;
+  model: string | null;
+  firmware: string | null;
+  capabilities: MinerCapabilities;
+  presets: Array<{
+    name: string;
+    pretty: string | null;
+    status: string | null;
+  }>;
+  error: string | null;
+}
+
+export interface FleetOverview {
+  totalMiners: number;
+  onlineMiners: number;
+  enabledMiners: number;
+  totalRateThs: number;
+  totalPowerWatts: number;
+  hottestBoardTemp: number | null;
+  hottestHotspotTemp: number | null;
+  generatedAt: string;
+}
+
+export interface MinerCommandResponse {
+  liveData: MinerLiveData;
+  response: unknown;
+}
+
+export interface MinersResponse {
+  miners: MinerEntity[];
+}
+
+export interface MinerResponse {
+  miner: MinerEntity | null;
+}
+
+export interface MinerDetailResponse {
+  miner: MinerEntity;
+  liveData: MinerLiveData;
+  pools: MinerPoolEntity[];
+  commands: Array<{
+    id: number;
+    minerId: number;
+    commandType: string;
+    request: unknown;
+    response: unknown;
+    status: "pending" | "completed" | "failed";
+    errorText: string | null;
+    createdBy: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface MinerLiveResponse {
+  liveData: MinerLiveData;
+}
+
+export interface MinerHistoryResponse {
+  history: MinerHistoryPoint[];
+}
+
+export interface MinerPoolsResponse {
+  pools: MinerPoolEntity[];
+}
+
+export interface FleetLiveResponse {
+  miners: MinerLiveData[];
+}
+
+export interface FleetOverviewResponse {
+  overview: FleetOverview;
+}
+
+export interface VerifyMinerDraftResponse {
+  apiBaseUrl: string;
+  verification: MinerVerificationResult;
+}
+
+export interface CreateMinerResponse {
+  miner: MinerEntity;
+  verification: MinerVerificationResult;
+  liveData: MinerLiveData | null;
+}
+
 export interface DashboardResponse {
   connection: ConnectionStatus;
   assets: Asset[];
