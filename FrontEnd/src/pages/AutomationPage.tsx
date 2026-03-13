@@ -806,6 +806,56 @@ function draftToPayload(draft: StrategyDraft, strategyId: string): unknown {
   };
 }
 
+function toStrategyId(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `strategy-${Date.now()}`
+  );
+}
+
+function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
+  return {
+    name: "",
+    description: "",
+    executionMode: "semi_auto",
+    scheduleInterval: "1h",
+    isEnabled: false,
+    compositionMode: "automatic",
+    baseStrategiesCsv: baseStrategyIds.join(", "),
+    strategyWeightRows: [],
+    autoStrategyUsage: true,
+    selectionConfig: {
+      minStrategyScore: "",
+      maxActiveStrategies: "",
+      maxWeightShiftPerCycle: "",
+      strategyCooldownHours: "",
+      minActiveDurationHours: "",
+      fallbackStrategy: baseStrategyIds[0] ?? "",
+    },
+    weightAdjustment: {
+      scorePower: "",
+      minWeightPctPerStrategy: "",
+      maxWeightPctPerStrategy: "",
+    },
+    metadataRiskLevel: "",
+    metadataExpectedTurnover: "",
+    metadataStablecoinExposure: "",
+    disabledAssetsCsv: "",
+    guards: {
+      maxSingleAssetPct: "",
+      minStablecoinPct: "",
+      maxTradesPerCycle: "",
+      minTradeNotional: "",
+      cashReservePct: "",
+    },
+    baseAllocationRows: [{ id: newId("allocation"), symbol: "BTC", percent: "50" }, { id: newId("allocation"), symbol: "USDC", percent: "50" }],
+    rules: [],
+  };
+}
+
 export function AutomationPage() {
   const queryClient = useQueryClient();
   const [accountType, setAccountType] = useState<PortfolioAccountType>("real");
@@ -831,6 +881,7 @@ export function AutomationPage() {
   const [draft, setDraft] = useState<StrategyDraft | null>(null);
   const [draftStrategyId, setDraftStrategyId] = useState("");
   const [draftDirty, setDraftDirty] = useState(false);
+  const [editorMode, setEditorMode] = useState<"edit" | "create">("edit");
 
   const today = new Date();
   const defaultEnd = today.toISOString().slice(0, 10);
@@ -843,11 +894,23 @@ export function AutomationPage() {
   const [rebalanceCostsPct, setRebalanceCostsPct] = useState("0.001");
   const [slippagePct, setSlippagePct] = useState("0.001");
 
+  const readOnlyStrategies = useMemo(
+    () => strategies.filter((strategy) => !strategy.baseStrategies || strategy.baseStrategies.length === 0),
+    [strategies]
+  );
+  const usableStrategies = useMemo(
+    () => strategies.filter((strategy) => (strategy.baseStrategies?.length ?? 0) > 0),
+    [strategies]
+  );
+
   useEffect(() => {
-    if ((!selectedStrategyId || !strategies.some((strategy) => strategy.id === selectedStrategyId)) && strategies.length > 0) {
-      setSelectedStrategyId(strategies[0].id);
+    if (
+      (!selectedStrategyId || !usableStrategies.some((strategy) => strategy.id === selectedStrategyId)) &&
+      usableStrategies.length > 0
+    ) {
+      setSelectedStrategyId(usableStrategies[0].id);
     }
-  }, [selectedStrategyId, strategies]);
+  }, [selectedStrategyId, usableStrategies]);
 
   useEffect(() => {
     if (runs.length === 0) {
@@ -868,8 +931,8 @@ export function AutomationPage() {
   }, [demoAccountData?.demoAccount.balance]);
 
   const selectedStrategy = useMemo(
-    () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
-    [selectedStrategyId, strategies]
+    () => usableStrategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
+    [selectedStrategyId, usableStrategies]
   );
 
   useEffect(() => {
@@ -952,6 +1015,44 @@ export function AutomationPage() {
     },
   });
 
+  const createStrategyMutation = useMutation({
+    mutationFn: async (payload: unknown) => {
+      const validation = await backendApi.validateStrategy(payload);
+      if (!validation.valid) {
+        throw new Error((validation.errors ?? ["Strategy validation failed."]).join(" | "));
+      }
+      return backendApi.createStrategy(payload);
+    },
+    onSuccess: async (result) => {
+      setErrorMessage("");
+      setMessage(`Created strategy ${result.strategy.name}.`);
+      setSelectedStrategyId(result.strategy.id);
+      setDraft(strategyToDraft(result.strategy));
+      setDraftStrategyId(result.strategy.id);
+      setDraftDirty(false);
+      setEditorMode("edit");
+      await invalidateAll();
+    },
+    onError: (error) => {
+      setMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create strategy.");
+    },
+  });
+
+  const deleteStrategyMutation = useMutation({
+    mutationFn: (strategyId: string) => backendApi.deleteStrategy(strategyId),
+    onSuccess: async () => {
+      setErrorMessage("");
+      setMessage("Strategy deleted.");
+      setSelectedStrategyId("");
+      await invalidateAll();
+    },
+    onError: (error) => {
+      setMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to delete strategy.");
+    },
+  });
+
   const backtestMutation = useMutation({
     mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
     onSuccess: async (result) => {
@@ -987,6 +1088,8 @@ export function AutomationPage() {
     runNowMutation.isPending ||
     toggleMutation.isPending ||
     saveStrategyMutation.isPending ||
+    createStrategyMutation.isPending ||
+    deleteStrategyMutation.isPending ||
     backtestMutation.isPending ||
     updateDemoBalanceMutation.isPending;
 
@@ -1095,7 +1198,7 @@ export function AutomationPage() {
   };
 
   const handleSaveStrategy = (): void => {
-    if (!selectedStrategy || !draft) return;
+    if (!draft) return;
     if (draftValidation && draftHasErrors) {
       setMessage("");
       setErrorMessage(firstDraftValidationError(draftValidation) ?? "Fix validation errors before saving.");
@@ -1103,8 +1206,14 @@ export function AutomationPage() {
     }
 
     try {
-      const payload = draftToPayload(draft, selectedStrategy.id);
-      saveStrategyMutation.mutate({ strategyId: selectedStrategy.id, payload });
+      const nextId = editorMode === "create" ? toStrategyId(draft.name) : selectedStrategy?.id;
+      if (!nextId) return;
+      const payload = draftToPayload(draft, nextId);
+      if (editorMode === "create") {
+        createStrategyMutation.mutate(payload);
+      } else {
+        saveStrategyMutation.mutate({ strategyId: nextId, payload });
+      }
     } catch (error) {
       setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Strategy draft is invalid.");
@@ -1112,6 +1221,11 @@ export function AutomationPage() {
   };
 
   const handleResetDraft = (): void => {
+    if (editorMode === "create") {
+      setDraft(createUsableStrategyDraft(readOnlyStrategies.map((strategy) => strategy.id)));
+      setDraftDirty(false);
+      return;
+    }
     if (!selectedStrategy) return;
     setDraft(strategyToDraft(selectedStrategy));
     setDraftDirty(false);
@@ -1158,7 +1272,16 @@ export function AutomationPage() {
   };
 
   const openStrategyEditor = (strategyId: string): void => {
+    setEditorMode("edit");
     setSelectedStrategyId(strategyId);
+    setIsEditorModalOpen(true);
+  };
+
+  const openCreateStrategyEditor = (): void => {
+    setEditorMode("create");
+    setDraft(createUsableStrategyDraft(readOnlyStrategies.map((strategy) => strategy.id)));
+    setDraftStrategyId("");
+    setDraftDirty(false);
     setIsEditorModalOpen(true);
   };
 
@@ -1280,42 +1403,74 @@ export function AutomationPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 rounded-lg border border-border bg-card overflow-hidden">
-          <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Catalog</div>
+          <div className="px-5 py-4 border-b border-border space-y-2">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Usable Strategies</div>
+            <div className="text-xs text-muted-foreground">
+              Basic strategies are read-only: {readOnlyStrategies.map((strategy) => strategy.name).join(", ") || "--"}
+            </div>
+            <button
+              onClick={openCreateStrategyEditor}
+              disabled={busy || readOnlyStrategies.length === 0}
+              className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60"
+            >
+              Create Usable Strategy
+            </button>
+          </div>
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Name", "Mode", "Enabled", "Interval", "Risk", "Next Run", "Actions"].map((heading) => (
+                {["Name", "Uses Basic", "Mode", "Enabled", "Interval", "Actions"].map((heading) => (
                   <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loadingStrategies ? (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading strategies...</td></tr>
-              ) : strategies.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">No strategies found.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading strategies...</td></tr>
+              ) : usableStrategies.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No usable strategies created yet.</td></tr>
               ) : (
-                strategies.map((strategy) => (
+                usableStrategies.map((strategy) => (
                   <tr
                     key={strategy.id}
                     className={cn("border-b border-border cursor-pointer", strategy.id === selectedStrategyId ? "bg-secondary/40" : "hover:bg-secondary/20")}
                     onClick={() => setSelectedStrategyId(strategy.id)}
                   >
                     <td className="py-3 px-4 text-left text-xs font-mono text-foreground">{strategy.name}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{(strategy.baseStrategies ?? []).join(", ") || "--"}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.executionMode}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono"><span className={strategy.isEnabled ? "text-positive" : "text-muted-foreground"}>{strategy.isEnabled ? "Yes" : "No"}</span></td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.scheduleInterval}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.metadata?.riskLevel ?? "--"}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(strategy.nextRunAt)}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSelectedStrategyId(strategy.id);
+                          setMessage(`Using strategy ${strategy.name}.`);
+                          setErrorMessage("");
+                        }}
+                        className="px-2 py-1 mr-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
+                      >
+                        Use
+                      </button>
                       <button
                         onClick={(event) => {
                           event.stopPropagation();
                           openStrategyEditor(strategy.id);
                         }}
-                        className="px-2 py-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
+                        className="px-2 py-1 mr-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
                       >
                         Edit
+                      </button>
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          deleteStrategyMutation.mutate(strategy.id);
+                        }}
+                        disabled={busy}
+                        className="px-2 py-1 rounded border border-negative/40 text-[11px] font-mono text-negative hover:bg-negative/10 disabled:opacity-60"
+                      >
+                        Delete
                       </button>
                     </td>
                   </tr>
@@ -1324,6 +1479,7 @@ export function AutomationPage() {
             </tbody>
           </table>
         </div>
+
 
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Selected Strategy</div>
@@ -1360,12 +1516,12 @@ export function AutomationPage() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Structured Strategy Editor</div>
-                <div className="mt-1 text-xs font-mono text-foreground">{selectedStrategy?.name ?? "Selected Strategy"}</div>
+                <div className="mt-1 text-xs font-mono text-foreground">{editorMode === "create" ? "New Usable Strategy" : selectedStrategy?.name ?? "Selected Strategy"}</div>
               </div>
               <div className="flex gap-2">
                 <button onClick={closeStrategyEditor} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary">Close</button>
-                <button onClick={handleResetDraft} disabled={busy || !draftDirty || !selectedStrategy} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
-                <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || !selectedStrategy || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">Save Strategy</button>
+                <button onClick={handleResetDraft} disabled={busy || !draftDirty} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
+                <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">{editorMode === "create" ? "Create Strategy" : "Save Strategy"}</button>
               </div>
             </div>
         {draftHasErrors ? <div className="text-xs font-mono text-negative">Fix inline validation errors to enable save.</div> : null}
@@ -1998,8 +2154,8 @@ export function AutomationPage() {
           <div className="border-t border-border px-4 py-3 text-xs font-mono text-muted-foreground">
             Use <span className="text-foreground">View</span> on a run row to open detailed results.
           </div>
-        </div>
 
+        </div>
         <div className="rounded-lg border border-border bg-card p-4 space-y-4">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Backtest Runner</div>
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">

@@ -1,0 +1,91 @@
+services:
+  backend:
+    image: docker.io/mikedim95/mytrader-backend:latest
+    container_name: mytrader-backend
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      CORS_ORIGIN: "http://${PI_HOST_OR_IP:-localhost}:8080"
+      STRATEGY_STORE_PATH: "/app/data/strategy-store.json"
+    volumes:
+      - backend_data:/app/data
+    ports:
+      - "3001:3001"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  frontend:
+    image: docker.io/mikedim95/mytrader-frontend:latest
+    container_name: mytrader-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  mysql:
+    image: mysql:8.0
+    container_name: mytrader-mysql
+    restart: unless-stopped
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    environment:
+      MYSQL_DATABASE: "${MYSQL_DATABASE:-mytrader}"
+      MYSQL_USER: "${MYSQL_USER:-mytrader}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:-change-me}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:-root-change-me}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-root-change-me}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: mytrader-n8n
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_TYPE: mysqldb
+      DB_MYSQLDB_HOST: mysql
+      DB_MYSQLDB_PORT: "3306"
+      DB_MYSQLDB_DATABASE: "${MYSQL_DATABASE:-mytrader}"
+      DB_MYSQLDB_USER: "${MYSQL_USER:-mytrader}"
+      DB_MYSQLDB_PASSWORD: "${MYSQL_PASSWORD:-change-me}"
+      N8N_HOST: "${PI_HOST_OR_IP:-localhost}"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      WEBHOOK_URL: "http://${PI_HOST_OR_IP:-localhost}:5678/"
+      GENERIC_TIMEZONE: "${GENERIC_TIMEZONE:-UTC}"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "5678:5678"
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  watchtower:
+    image: nickfedor/watchtower:latest
+    container_name: mytrader-watchtower
+    restart: unless-stopped
+    command: --interval 300 --cleanup --label-enable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  backend_data:
+  mysql_data:
+  n8n_data:

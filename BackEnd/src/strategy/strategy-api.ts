@@ -133,6 +133,22 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
     res.json({ strategy: merged.data });
   });
 
+  router.delete("/strategies/:id", async (req, res) => {
+    const existing = await deps.repository.getStrategy(req.params.id);
+    if (!existing) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    if (!existing.baseStrategies || existing.baseStrategies.length === 0) {
+      res.status(400).json({ message: "Base read-only strategies cannot be deleted." });
+      return;
+    }
+
+    await deps.repository.deleteStrategy(req.params.id);
+    res.json({ success: true });
+  });
+
   router.post("/strategies/:id/run", async (req, res) => {
     try {
       const run = await deps.runner.runStrategy(req.params.id, "api", parseAccountType(req));
