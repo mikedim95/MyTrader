@@ -7,21 +7,43 @@ import type {
   ConnectionStatus,
   DemoAccountSettingsResponse,
   CreateBacktestResponse,
+  CreateMinerResponse,
   DashboardResponse,
   ExecutionPlanResponse,
+  FleetLiveResponse,
+  FleetOverviewResponse,
   MiningOverviewResponse,
+  MinerCommandResponse,
+  MinerDetailResponse,
+  MinerHistoryResponse,
+  MinerLiveResponse,
+  MinerPoolsResponse,
+  MinersResponse,
   NicehashOverviewResponse,
   OrdersResponse,
   PortfolioAccountType,
+  SessionLoginResponse,
+  SessionStatusResponse,
   StrategiesResponse,
   StrategyResponse,
   StrategyRunResponse,
   StrategyRunsResponse,
   StrategyStateResponse,
   StrategyValidationResponse,
+  VerifyMinerDraftResponse,
 } from "@/types/api";
+import { getStoredSession } from "@/lib/session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
+
+function resolveUserScope(): { userId?: number; username?: string } {
+  const session = getStoredSession();
+  if (!session) return {};
+  if (typeof session.userId === "number") {
+    return { userId: session.userId };
+  }
+  return { username: session.username };
+}
 
 interface ConnectRequest {
   apiKey: string;
@@ -55,6 +77,12 @@ function parseJsonSafely(text: string): unknown {
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
+  const userScope = resolveUserScope();
+  if (typeof userScope.userId === "number") {
+    headers.set("x-user-id", String(userScope.userId));
+  } else if (userScope.username) {
+    headers.set("x-user", userScope.username);
+  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -79,11 +107,114 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function publicApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const bodyText = await response.text();
+  const payload = parseJsonSafely(bodyText);
+
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === "object" &&
+      "message" in payload &&
+      typeof (payload as { message: unknown }).message === "string"
+        ? (payload as { message: string }).message
+        : `Request failed with status ${response.status}`;
+
+    const error = new Error(message) as Error & {
+      responsePayload?: unknown;
+    };
+    error.responsePayload = payload;
+    throw error;
+  }
+
+  return payload as T;
+}
+
 export const backendApi = {
-  getDashboard: () => apiRequest<DashboardResponse>("/api/dashboard"),
+  getSessionStatus: () => publicApiRequest<SessionStatusResponse>("/api/session/status"),
+  loginSession: (body: { username: string; password: string }) =>
+    publicApiRequest<SessionLoginResponse>("/api/session/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getDashboard: (accountType: PortfolioAccountType = "real") =>
+    apiRequest<DashboardResponse>(withQuery("/api/dashboard", { accountType })),
   getOrders: () => apiRequest<OrdersResponse>("/api/orders"),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),
   getNicehashOverview: () => apiRequest<NicehashOverviewResponse>("/api/mining/nicehash"),
+  verifyMinerDraft: (body: { name: string; ip: string; password: string }) =>
+    apiRequest<VerifyMinerDraftResponse>("/api/miners/verify-draft", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  createMiner: (body: { name: string; ip: string; password: string }) =>
+    apiRequest<CreateMinerResponse>("/api/miners", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getMiners: () => apiRequest<MinersResponse>("/api/miners"),
+  getMinerDetails: (minerId: number) => apiRequest<MinerDetailResponse>(`/api/miners/${minerId}`),
+  updateMiner: (minerId: number, body: { name?: string; ip?: string; password?: string; isEnabled?: boolean }) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  verifyMiner: (minerId: number) =>
+    apiRequest<{ verification: VerifyMinerDraftResponse["verification"] }>(`/api/miners/${minerId}/verify`, {
+      method: "POST",
+    }),
+  enableMiner: (minerId: number) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}/enable`, {
+      method: "POST",
+    }),
+  disableMiner: (minerId: number) =>
+    apiRequest<MinerResponse>(`/api/miners/${minerId}/disable`, {
+      method: "POST",
+    }),
+  getMinerLive: (minerId: number) => apiRequest<MinerLiveResponse>(`/api/miners/${minerId}/live`),
+  getMinerHistory: (minerId: number, limit = 120) =>
+    apiRequest<MinerHistoryResponse>(withQuery(`/api/miners/${minerId}/history`, { limit: String(limit) })),
+  getMinerPools: (minerId: number) => apiRequest<MinerPoolsResponse>(`/api/miners/${minerId}/pools`),
+  getFleetLive: () => apiRequest<FleetLiveResponse>("/api/fleet/live"),
+  getFleetOverview: () => apiRequest<FleetOverviewResponse>("/api/fleet/overview"),
+  restartMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/restart`, {
+      method: "POST",
+    }),
+  rebootMiner: (minerId: number, after = 3) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/reboot`, {
+      method: "POST",
+      body: JSON.stringify({ after }),
+    }),
+  startMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/start`, {
+      method: "POST",
+    }),
+  stopMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/stop`, {
+      method: "POST",
+    }),
+  pauseMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/pause`, {
+      method: "POST",
+    }),
+  resumeMiner: (minerId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/resume`, {
+      method: "POST",
+    }),
+  switchMinerPool: (minerId: number, poolId: number) =>
+    apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/switch-pool`, {
+      method: "POST",
+      body: JSON.stringify({ poolId }),
+    }),
   getBinanceConnection: () => apiRequest<ConnectionStatus>("/api/binance/connection"),
   connectBinance: (body: ConnectRequest) =>
     apiRequest<ConnectionStatus>("/api/binance/connection", {

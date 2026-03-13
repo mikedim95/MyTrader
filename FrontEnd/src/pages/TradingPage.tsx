@@ -3,9 +3,14 @@ import { Lock } from "lucide-react";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { useDashboardData } from "@/hooks/useTradingData";
 import { cn } from "@/lib/utils";
+import type { PortfolioAccountType } from "@/types/api";
 
-export function TradingPage() {
-  const { data, isPending, error } = useDashboardData();
+interface TradingPageProps {
+  accountType: PortfolioAccountType;
+}
+
+export function TradingPage({ accountType }: TradingPageProps) {
+  const { data, isPending, error } = useDashboardData(accountType);
   const isLoading = isPending && !data;
 
   const [side, setSide] = useState<"Buy" | "Sell">("Buy");

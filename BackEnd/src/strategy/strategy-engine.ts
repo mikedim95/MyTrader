@@ -4,6 +4,7 @@ import { buildRebalancePlan } from "./rebalance-planner.js";
 import { evaluateRules } from "./rule-evaluator.js";
 import { scoreStrategyForCycle } from "./strategy-scoring.js";
 import { detectMarketRegime } from "./strategy-regime.js";
+import { getBasicStrategyIds } from "./strategy-catalog.js";
 import { mergeAssetUniverse, normalizeAllocation, withAllAssets } from "./allocation-utils.js";
 import {
   AllocationMap,
@@ -44,6 +45,12 @@ interface AutomaticWeightingResult {
   activeWeights: Record<string, number>;
   warnings: string[];
   marketRegime: MarketRegime;
+}
+
+function normalizeExecutionMode(mode: string | undefined): "manual" | "hybrid" | "automatic" {
+  if (mode === "semi_auto" || mode === "hybrid") return "hybrid";
+  if (mode === "auto" || mode === "automatic") return "automatic";
+  return "manual";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -393,6 +400,7 @@ export class StrategyEngine {
 
   evaluate(input: StrategyEngineInput): StrategyEvaluationResult {
     const strategyUniverse = input.strategyUniverse ?? { [input.strategy.id]: input.strategy };
+    let strategyMode = normalizeExecutionMode(input.strategy.executionMode);
     const symbols = mergeAssetUniverse(input.strategy.baseAllocation, input.portfolio.allocation);
     const currentAllocation = normalizeAllocation(withAllAssets(input.portfolio.allocation, symbols), symbols);
 
@@ -402,9 +410,18 @@ export class StrategyEngine {
     let compositionReasonByAsset: Record<string, string> = {};
     let compositionDetails: StrategyEvaluationResult["composition"];
 
-    const requestedBaseStrategies = (input.strategy.baseStrategies ?? [])
+    let requestedBaseStrategies = (input.strategy.baseStrategies ?? [])
       .map((strategyId) => strategyId.trim().toLowerCase())
       .filter((strategyId) => strategyId.length > 0 && strategyId !== input.strategy.id.toLowerCase());
+
+    if (strategyMode === "automatic" && requestedBaseStrategies.length > 0) {
+      strategyMode = "hybrid";
+    }
+    if (strategyMode === "automatic" && requestedBaseStrategies.length === 0) {
+      requestedBaseStrategies = getBasicStrategyIds().filter(
+        (strategyId) => strategyId !== input.strategy.id.toLowerCase()
+      );
+    }
 
     if (requestedBaseStrategies.length > 0) {
       const baseStrategies = requestedBaseStrategies
@@ -445,7 +462,7 @@ export class StrategyEngine {
           );
         });
 
-        const automaticMode = input.strategy.compositionMode === "automatic" || Boolean(input.strategy.autoStrategyUsage);
+        const automaticMode = strategyMode !== "manual";
         let activeWeights: Record<string, number>;
         let strategyScores: StrategyScoreResult[];
         let marketRegime: MarketRegime;
@@ -479,7 +496,7 @@ export class StrategyEngine {
         compositionReasonByAsset = merged.reasonByAsset;
 
         compositionDetails = {
-          compositionMode: input.strategy.compositionMode ?? "manual",
+          compositionMode: strategyMode === "manual" ? "manual" : "automatic",
           autoStrategyUsage: automaticMode,
           marketRegime,
           strategyScores,
@@ -517,7 +534,7 @@ export class StrategyEngine {
     const executionPlan = generateExecutionPlan({
       strategyId: input.strategy.id,
       accountType: input.accountType ?? "real",
-      mode: input.modeOverride ?? input.strategy.executionMode,
+      mode: normalizeExecutionMode(input.modeOverride ?? strategyMode),
       currentAllocation,
       targetAllocation: adjustedTargetAllocation,
       rebalancePlan,

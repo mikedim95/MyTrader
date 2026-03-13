@@ -1,11 +1,14 @@
 import { z } from "zod";
 import {
+  LegacyStrategyMode,
   StrategyActionType,
   StrategyConfig,
   StrategyCondition,
   StrategyCompositionMode,
   StrategyGuardConfig,
+  StrategyMode,
   StrategyRule,
+  LEGACY_STRATEGY_MODES,
   STRATEGY_ACTION_TYPES,
   STRATEGY_COMPOSITION_MODES,
   STRATEGY_INDICATORS,
@@ -13,6 +16,7 @@ import {
   STRATEGY_OPERATORS,
 } from "./types.js";
 import { normalizeAllocation, toUpperSymbol } from "./allocation-utils.js";
+import { getBasicStrategyIds } from "./strategy-catalog.js";
 
 const baseAllocationSchema = z.record(z.string(), z.number().finite().min(0));
 
@@ -62,8 +66,8 @@ const guardsSchema = z
   .object({
     max_single_asset_pct: z.number().finite().min(0).max(100).optional(),
     min_stablecoin_pct: z.number().finite().min(0).max(100).optional(),
-    max_trades_per_cycle: z.number().int().min(0).max(200).optional(),
-    min_trade_notional: z.number().finite().min(0).optional(),
+    max_trades_per_cycle: z.number().int().min(1).max(200).optional(),
+    min_trade_notional: z.number().finite().positive().optional(),
     cash_reserve_pct: z.number().finite().min(0).max(100).optional(),
   })
   .default({});
@@ -98,6 +102,8 @@ const weightAdjustmentConfigSchema = z
   })
   .default({});
 
+const strategyModeSchema = z.enum([...STRATEGY_MODES, ...LEGACY_STRATEGY_MODES] as const);
+
 export const strategyDslSchema = z.object({
   id: z.string().min(1).optional(),
   name: z.string().min(1),
@@ -105,7 +111,7 @@ export const strategyDslSchema = z.object({
   baseAllocation: baseAllocationSchema,
   rules: z.array(ruleSchema).default([]),
   guards: guardsSchema,
-  executionMode: z.enum(STRATEGY_MODES).default("manual"),
+  executionMode: strategyModeSchema.default("manual"),
   metadata: metadataSchema,
   isEnabled: z.boolean().optional(),
   scheduleInterval: z.string().regex(/^\d+(s|m|h|d)$/i).optional(),
@@ -113,7 +119,8 @@ export const strategyDslSchema = z.object({
   nextRunAt: z.string().datetime().optional(),
   disabledAssets: z.array(z.string().min(1)).optional(),
   compositionMode: z.enum(STRATEGY_COMPOSITION_MODES).default("manual"),
-  baseStrategies: z.array(z.string().min(1)).default([]),
+  baseStrategies: z.array(z.string().min(1)).optional(),
+  allowedBaseStrategies: z.array(z.string().min(1)).optional(),
   strategyWeights: strategyWeightsSchema,
   autoStrategyUsage: z.boolean().default(false),
   strategySelectionConfig: strategySelectionConfigSchema,
@@ -167,6 +174,13 @@ function normalizeGuards(guards: StrategyGuardConfig): StrategyGuardConfig {
 
 function normalizeCompositionMode(mode: StrategyCompositionMode | undefined): StrategyCompositionMode {
   return mode === "automatic" ? "automatic" : "manual";
+}
+
+function normalizeExecutionMode(mode: StrategyMode | LegacyStrategyMode | undefined): StrategyMode {
+  if (mode === "semi_auto") return "hybrid";
+  if (mode === "auto") return "automatic";
+  if (mode === "hybrid" || mode === "automatic") return mode;
+  return "manual";
 }
 
 function normalizeBaseStrategies(baseStrategies: string[] | undefined): string[] {
@@ -246,31 +260,127 @@ export function validateStrategyDsl(input: unknown, nowIso = new Date().toISOStr
     };
   }
 
+  const baseAllocationBySymbol: Record<string, number> = {};
+  const seenRawSymbols = new Set<string>();
+  const duplicateSymbols = new Set<string>();
+  Object.entries(parsed.data.baseAllocation).forEach(([symbol, value]) => {
+    const normalizedSymbol = toUpperSymbol(symbol);
+    if (seenRawSymbols.has(normalizedSymbol)) {
+      duplicateSymbols.add(normalizedSymbol);
+    }
+    seenRawSymbols.add(normalizedSymbol);
+    baseAllocationBySymbol[normalizedSymbol] = (baseAllocationBySymbol[normalizedSymbol] ?? 0) + value;
+  });
+
+  const baseAllocationTotal = Object.values(baseAllocationBySymbol).reduce((sum, value) => sum + value, 0);
+  const selectedOrAllowedBaseStrategies = normalizeBaseStrategies(
+    parsed.data.allowedBaseStrategies ?? parsed.data.baseStrategies
+  );
+  const normalizedWeights = normalizeStrategyWeights(parsed.data.strategyWeights);
+  const fallbackStrategy = parsed.data.strategySelectionConfig.fallbackStrategy?.trim().toLowerCase();
+  const basicCatalogIds = getBasicStrategyIds();
+  const basicCatalogCount = basicCatalogIds.length;
+  const basicCatalogSet = new Set(basicCatalogIds);
+
+  let executionMode = normalizeExecutionMode(parsed.data.executionMode);
+  if (executionMode === "automatic" && selectedOrAllowedBaseStrategies.length > 0) {
+    executionMode = "hybrid";
+  }
+
+  const errors: string[] = [];
+  if (duplicateSymbols.size > 0) {
+    errors.push(`Duplicate base allocation symbols: ${Array.from(duplicateSymbols).sort().join(", ")}.`);
+  }
+  if (Math.abs(baseAllocationTotal - 100) > 0.0001) {
+    errors.push("Base allocation must total exactly 100%.");
+  }
+
+  const requiresAllowedPool = executionMode === "manual" || executionMode === "hybrid";
+  const usesAutomationControls = executionMode !== "manual";
+  if (requiresAllowedPool && selectedOrAllowedBaseStrategies.length === 0) {
+    errors.push(
+      executionMode === "manual"
+        ? "Manual mode requires at least one selected base strategy."
+        : "Hybrid mode requires at least one allowed base strategy."
+    );
+  }
+
+  if (usesAutomationControls) {
+    if (fallbackStrategy && requiresAllowedPool && !selectedOrAllowedBaseStrategies.includes(fallbackStrategy)) {
+      errors.push("Fallback strategy must belong to the selected/allowed strategy list.");
+    }
+    if (fallbackStrategy && executionMode === "automatic" && !basicCatalogSet.has(fallbackStrategy)) {
+      errors.push("Fallback strategy must be a basic strategy id in automatic mode.");
+    }
+
+    const maxActiveStrategies = parsed.data.strategySelectionConfig.maxActiveStrategies;
+    if (typeof maxActiveStrategies === "number") {
+      if (executionMode === "automatic" && maxActiveStrategies > basicCatalogCount) {
+        errors.push(`Max active strategies cannot exceed the basic strategy catalog size (${basicCatalogCount}).`);
+      }
+      if (
+        requiresAllowedPool &&
+        selectedOrAllowedBaseStrategies.length > 0 &&
+        maxActiveStrategies > selectedOrAllowedBaseStrategies.length
+      ) {
+        errors.push("Max active strategies cannot exceed selected/allowed base strategies.");
+      }
+    }
+
+    const minWeight = parsed.data.weightAdjustmentConfig.minWeightPctPerStrategy;
+    const maxWeight = parsed.data.weightAdjustmentConfig.maxWeightPctPerStrategy;
+    if (typeof minWeight === "number" && typeof maxWeight === "number" && minWeight > maxWeight) {
+      errors.push("Min weight % per strategy cannot exceed max weight % per strategy.");
+    }
+  }
+
+  const minStablePct = parsed.data.guards.min_stablecoin_pct ?? 0;
+  const cashReservePct = parsed.data.guards.cash_reserve_pct ?? 0;
+  if (minStablePct + cashReservePct > 100) {
+    errors.push("Min stable % plus cash reserve % cannot exceed 100.");
+  }
+
+  if (requiresAllowedPool) {
+    const invalidWeightIds = Object.keys(normalizedWeights).filter(
+      (strategyId) => !selectedOrAllowedBaseStrategies.includes(strategyId)
+    );
+    if (invalidWeightIds.length > 0) {
+      errors.push(`Strategy weights reference strategies outside selected/allowed pool: ${invalidWeightIds.join(", ")}.`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      success: false,
+      errors,
+    };
+  }
+
   const normalized: StrategyConfig = {
     id: strategyId,
     name: parsed.data.name.trim(),
     description: parsed.data.description?.trim() || undefined,
-    baseAllocation: normalizeBaseAllocation(parsed.data.baseAllocation),
+    baseAllocation: normalizeBaseAllocation(baseAllocationBySymbol),
     rules: normalizedRules,
     guards: normalizeGuards(parsed.data.guards),
-    executionMode: parsed.data.executionMode,
+    executionMode,
     metadata: parsed.data.metadata,
     isEnabled: parsed.data.isEnabled ?? false,
     scheduleInterval: parsed.data.scheduleInterval ?? "15m",
     lastRunAt: parsed.data.lastRunAt,
     nextRunAt: parsed.data.nextRunAt,
-    disabledAssets: parsed.data.disabledAssets?.map(toUpperSymbol),
-    compositionMode: normalizeCompositionMode(parsed.data.compositionMode),
-    baseStrategies: normalizeBaseStrategies(parsed.data.baseStrategies),
-    strategyWeights: normalizeStrategyWeights(parsed.data.strategyWeights),
-    autoStrategyUsage: Boolean(parsed.data.autoStrategyUsage),
+    disabledAssets: Array.from(new Set((parsed.data.disabledAssets ?? []).map(toUpperSymbol))).sort(),
+    compositionMode: normalizeCompositionMode(executionMode === "manual" ? "manual" : "automatic"),
+    baseStrategies: executionMode === "automatic" ? [] : selectedOrAllowedBaseStrategies,
+    strategyWeights: normalizedWeights,
+    autoStrategyUsage: executionMode !== "manual",
     strategySelectionConfig: {
       minStrategyScore: parsed.data.strategySelectionConfig.minStrategyScore,
       maxActiveStrategies: parsed.data.strategySelectionConfig.maxActiveStrategies,
       maxWeightShiftPerCycle: parsed.data.strategySelectionConfig.maxWeightShiftPerCycle,
       strategyCooldownHours: parsed.data.strategySelectionConfig.strategyCooldownHours,
       minActiveDurationHours: parsed.data.strategySelectionConfig.minActiveDurationHours,
-      fallbackStrategy: parsed.data.strategySelectionConfig.fallbackStrategy?.trim().toLowerCase(),
+      fallbackStrategy,
     },
     weightAdjustmentConfig: {
       scorePower: parsed.data.weightAdjustmentConfig.scorePower,

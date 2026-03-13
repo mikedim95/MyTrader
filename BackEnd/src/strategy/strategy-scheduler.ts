@@ -38,20 +38,24 @@ export class StrategyScheduler {
 
     try {
       const nowIso = new Date().toISOString();
-      const dueStrategies = await this.repository.listDueStrategies(nowIso);
+      const scopes = await this.repository.listUserScopes();
 
-      for (const strategy of dueStrategies) {
-        if (this.runner.isRunning(strategy.id, "real")) {
-          continue;
-        }
+      for (const scope of scopes) {
+        const dueStrategies = await this.repository.listDueStrategies(nowIso, scope);
 
-        try {
-          await this.runner.runStrategy(strategy.id, "schedule", "real");
-        } catch (error) {
-          console.error(
-            `[strategy-scheduler] Strategy ${strategy.id} failed:`,
-            error instanceof Error ? error.message : error
-          );
+        for (const strategy of dueStrategies) {
+          if (this.runner.isRunning(strategy.id, "real", scope)) {
+            continue;
+          }
+
+          try {
+            await this.runner.runStrategy(strategy.id, "schedule", "real", scope);
+          } catch (error) {
+            console.error(
+              `[strategy-scheduler] user=${scope.username ?? scope.userId} strategy=${strategy.id} failed:`,
+              error instanceof Error ? error.message : error
+            );
+          }
         }
       }
     } finally {

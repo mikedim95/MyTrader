@@ -3,6 +3,7 @@ import { StrategyEngine } from "./strategy-engine.js";
 import { StrategyRepository } from "./strategy-repository.js";
 import { MockHistoricalMarketDataSource } from "./historical-market-data.js";
 import { computeBacktestMetrics } from "./performance-metrics.js";
+import { StrategyUserScope } from "./strategy-user-scope.js";
 import {
   AllocationMap,
   BacktestRequest,
@@ -125,12 +126,20 @@ export class BacktestEngine {
   async runBacktest(request: BacktestRequest): Promise<{
     run: BacktestRun;
     steps: BacktestStep[];
+  }>;
+  async runBacktest(request: BacktestRequest, userScope: StrategyUserScope): Promise<{
+    run: BacktestRun;
+    steps: BacktestStep[];
+  }>;
+  async runBacktest(request: BacktestRequest, userScope?: StrategyUserScope): Promise<{
+    run: BacktestRun;
+    steps: BacktestStep[];
   }> {
-    const strategy = await this.repository.getStrategy(request.strategyId);
+    const strategy = await this.repository.getStrategy(request.strategyId, userScope);
     if (!strategy) {
       throw new Error(`Strategy ${request.strategyId} was not found.`);
     }
-    const strategyUniverse = (await this.repository.listStrategies()).reduce<Record<string, StrategyConfig>>(
+    const strategyUniverse = (await this.repository.listStrategies(userScope)).reduce<Record<string, StrategyConfig>>(
       (acc, item) => {
         acc[item.id] = item;
         return acc;
@@ -144,7 +153,7 @@ export class BacktestEngine {
       endDate: request.endDate,
       initialCapital: request.initialCapital,
       status: "running",
-    });
+    }, userScope);
 
     try {
       const symbols = sortSymbols([...Object.keys(strategy.baseAllocation), request.baseCurrency]);
@@ -227,7 +236,7 @@ export class BacktestEngine {
         });
       }
 
-      await this.repository.appendBacktestSteps(steps);
+      await this.repository.appendBacktestSteps(steps, userScope);
 
       const metrics = computeBacktestMetrics({
         initialCapital: request.initialCapital,
@@ -246,7 +255,7 @@ export class BacktestEngine {
         rebalanceCount: metrics.rebalanceCount,
         averageStablecoinAllocationPct: metrics.averageStablecoinAllocationPct,
         completedAt: new Date().toISOString(),
-      });
+      }, userScope);
 
       if (!completed) {
         throw new Error(`Backtest run ${run.id} was not found during completion update.`);
@@ -261,7 +270,7 @@ export class BacktestEngine {
         status: "failed",
         error: error instanceof Error ? error.message : "Backtest failed.",
         completedAt: new Date().toISOString(),
-      });
+      }, userScope);
 
       if (!failed) {
         throw error;

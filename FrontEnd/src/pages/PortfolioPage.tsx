@@ -2,14 +2,15 @@ import { Lock } from "lucide-react";
 import { AssetRow } from "@/components/AssetRow";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { useDashboardData } from "@/hooks/useTradingData";
-import type { Asset } from "@/types/api";
+import type { Asset, PortfolioAccountType } from "@/types/api";
 
 interface PortfolioPageProps {
+  accountType: PortfolioAccountType;
   onSelectAsset?: (asset: Asset) => void;
 }
 
-export function PortfolioPage({ onSelectAsset }: PortfolioPageProps) {
-  const { data, isPending, error } = useDashboardData();
+export function PortfolioPage({ accountType, onSelectAsset }: PortfolioPageProps) {
+  const { data, isPending, error } = useDashboardData(accountType);
   const isLoading = isPending && !data;
 
   const assets = data?.assets ?? [];

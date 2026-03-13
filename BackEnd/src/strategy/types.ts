@@ -27,8 +27,10 @@ export const STRATEGY_ACTION_TYPES = [
 ] as const;
 export type StrategyActionType = (typeof STRATEGY_ACTION_TYPES)[number];
 
-export const STRATEGY_MODES = ["manual", "semi_auto", "auto"] as const;
+export const STRATEGY_MODES = ["manual", "hybrid", "automatic"] as const;
 export type StrategyMode = (typeof STRATEGY_MODES)[number];
+export const LEGACY_STRATEGY_MODES = ["semi_auto", "auto"] as const;
+export type LegacyStrategyMode = (typeof LEGACY_STRATEGY_MODES)[number];
 
 export const STRATEGY_COMPOSITION_MODES = ["manual", "automatic"] as const;
 export type StrategyCompositionMode = (typeof STRATEGY_COMPOSITION_MODES)[number];

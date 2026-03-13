@@ -68,7 +68,7 @@ const presetInputs: unknown[] = [
     id: "btc-dominance-rotation",
     name: "BTC Dominance Rotation",
     description: "Rotate exposure between BTC and altcoins based on BTC dominance regimes.",
-    executionMode: "semi_auto",
+    executionMode: "hybrid",
     scheduleInterval: "1h",
     isEnabled: false,
     baseAllocation: {
@@ -131,7 +131,7 @@ const presetInputs: unknown[] = [
     id: "momentum-rotation",
     name: "Momentum Rotation",
     description: "Modestly overweight stronger assets and trim weakening assets.",
-    executionMode: "semi_auto",
+    executionMode: "hybrid",
     scheduleInterval: "1h",
     isEnabled: false,
     baseAllocation: {
@@ -211,7 +211,7 @@ const presetInputs: unknown[] = [
     id: "mean-reversion",
     name: "Mean Reversion",
     description: "Trim overextended moves and add to oversold majors.",
-    executionMode: "semi_auto",
+    executionMode: "hybrid",
     scheduleInterval: "1h",
     isEnabled: false,
     baseAllocation: {
@@ -309,7 +309,7 @@ const presetInputs: unknown[] = [
     id: "periodic-rebalancing",
     name: "Periodic Rebalancing",
     description: "Hold strategic target weights and rebalance at fixed intervals.",
-    executionMode: "semi_auto",
+    executionMode: "hybrid",
     scheduleInterval: "4h",
     isEnabled: false,
     baseAllocation: {
@@ -338,7 +338,7 @@ const presetInputs: unknown[] = [
     id: "relative-strength-rotation",
     name: "Relative Strength Rotation",
     description: "Rotate exposure toward stronger assets and trim weaker ones.",
-    executionMode: "semi_auto",
+    executionMode: "hybrid",
     scheduleInterval: "1h",
     isEnabled: false,
     baseAllocation: {

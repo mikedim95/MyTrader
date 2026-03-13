@@ -42,7 +42,7 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "h-screen flex flex-col border-r border-border bg-card transition-all duration-200",
+        "h-screen flex flex-col border-r border-border bg-card transition-all duration-300 ease-out",
         collapsed ? "w-16" : "w-60"
       )}
     >
@@ -72,11 +72,11 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
               key={item.id}
               onClick={() => onNavigate(item.id)}
               className={cn(
-                "w-full flex items-center gap-3 rounded-md text-sm transition-colors",
+                "w-full flex items-center gap-3 rounded-md text-sm transition-all duration-300 ease-out transform-gpu",
                 collapsed ? "justify-center px-2 py-2.5" : "px-3 py-2.5",
                 active
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  ? "bg-secondary text-foreground shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]"
+                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50 hover:translate-x-1"
               )}
             >
               <item.icon className="h-4 w-4 shrink-0" />
@@ -115,7 +115,7 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
 
       <button
         onClick={() => setCollapsed(!collapsed)}
-        className="h-10 flex items-center justify-center border-t border-border text-muted-foreground hover:text-foreground transition-colors"
+        className="h-10 flex items-center justify-center border-t border-border text-muted-foreground hover:text-foreground transition-all duration-300 hover:bg-secondary/40"
       >
         {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
       </button>
