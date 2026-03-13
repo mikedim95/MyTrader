@@ -5,7 +5,12 @@ services:
     restart: unless-stopped
     environment:
       PORT: "3001"
-      CORS_ORIGIN: "http://${PI_HOST_OR_IP:-localhost}:8080"
+      CORS_ORIGIN: "http://${PI_HOST_OR_IP:-localhost}:8080,http://localhost:8080"
+      MYAPP_DB_HOST: "mysql"
+      MYAPP_DB_PORT: "3306"
+      MYAPP_DB_NAME: "${MYSQL_DATABASE:-mytrader}"
+      MYAPP_DB_USER: "${MYSQL_USER:-mytrader}"
+      MYAPP_DB_PASSWORD: "${MYSQL_PASSWORD:root-change-me}"
       STRATEGY_STORE_PATH: "/app/data/strategy-store.json"
     volumes:
       - backend_data:/app/data
@@ -43,7 +48,15 @@ services:
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:-root-change-me}"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "127.0.0.1",
+          "-p${MYSQL_ROOT_PASSWORD:-root-change-me}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10

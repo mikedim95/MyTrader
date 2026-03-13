@@ -3,7 +3,7 @@ WORKDIR /app
 COPY FrontEnd/package*.json ./
 RUN npm ci
 COPY FrontEnd/ .
-ARG VITE_API_BASE_URL=http://localhost:3001
+ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN npm run build
 
