@@ -916,22 +916,23 @@ function toStrategyId(name: string): string {
 }
 
 function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
-  const defaultAllowedStrategies = baseStrategyIds.slice(0, Math.min(3, baseStrategyIds.length));
   return {
     name: "",
     description: "",
-    executionMode: "hybrid",
+    executionMode: "semi_auto",
     scheduleInterval: "1h",
     isEnabled: false,
-    baseStrategiesCsv: defaultAllowedStrategies.join(", "),
+    compositionMode: "automatic",
+    baseStrategiesCsv: baseStrategyIds.join(", "),
     strategyWeightRows: [],
+    autoStrategyUsage: true,
     selectionConfig: {
       minStrategyScore: "",
       maxActiveStrategies: "",
       maxWeightShiftPerCycle: "",
       strategyCooldownHours: "",
       minActiveDurationHours: "",
-      fallbackStrategy: defaultAllowedStrategies[0] ?? "",
+      fallbackStrategy: baseStrategyIds[0] ?? "",
     },
     weightAdjustment: {
       scorePower: "",
@@ -954,7 +955,7 @@ function createUsableStrategyDraft(baseStrategyIds: string[]): StrategyDraft {
   };
 }
 
-export function AutomationPage({ accountType }: AutomationPageProps) {
+export function AutomationPage() {
   const queryClient = useQueryClient();
   const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
   const [isRunDetailsModalOpen, setIsRunDetailsModalOpen] = useState(false);
@@ -977,7 +978,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const [draftStrategyId, setDraftStrategyId] = useState("");
   const [draftDirty, setDraftDirty] = useState(false);
   const [editorMode, setEditorMode] = useState<"edit" | "create">("edit");
-  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   const today = new Date();
   const defaultEnd = today.toISOString().slice(0, 10);
@@ -991,11 +991,11 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const [slippagePct, setSlippagePct] = useState("0.001");
 
   const readOnlyStrategies = useMemo(
-    () => strategies.filter((strategy) => BASIC_STRATEGY_IDS.has(strategy.id.toLowerCase())),
+    () => strategies.filter((strategy) => !strategy.baseStrategies || strategy.baseStrategies.length === 0),
     [strategies]
   );
   const usableStrategies = useMemo(
-    () => strategies.filter((strategy) => !BASIC_STRATEGY_IDS.has(strategy.id.toLowerCase())),
+    () => strategies.filter((strategy) => (strategy.baseStrategies?.length ?? 0) > 0),
     [strategies]
   );
 
@@ -1022,24 +1022,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const selectedStrategy = useMemo(
     () => usableStrategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
     [selectedStrategyId, usableStrategies]
-  );
-  const strategyNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    strategies.forEach((strategy) => {
-      map.set(strategy.id, strategy.name);
-    });
-    return map;
-  }, [strategies]);
-  const baseStrategyOptions = useMemo(
-    () =>
-      readOnlyStrategies
-        .map((strategy) => ({ id: strategy.id, name: strategy.name }))
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    [readOnlyStrategies]
-  );
-  const selectedBaseStrategyIds = useMemo(
-    () => parseStrategyIdCsv(draft?.baseStrategiesCsv ?? ""),
-    [draft?.baseStrategiesCsv]
   );
   const selectedBaseStrategiesLabel = useMemo(() => {
     if (selectedBaseStrategyIds.length === 0) return "Select base strategies";
@@ -1202,6 +1184,38 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
     onSuccess: async (result) => {
       setErrorMessage("");
+      setMessage(`Created strategy ${result.strategy.name}.`);
+      setSelectedStrategyId(result.strategy.id);
+      setDraft(strategyToDraft(result.strategy));
+      setDraftStrategyId(result.strategy.id);
+      setDraftDirty(false);
+      setEditorMode("edit");
+      await invalidateAll();
+    },
+    onError: (error) => {
+      setMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to create strategy.");
+    },
+  });
+
+  const deleteStrategyMutation = useMutation({
+    mutationFn: (strategyId: string) => backendApi.deleteStrategy(strategyId),
+    onSuccess: async () => {
+      setErrorMessage("");
+      setMessage("Strategy deleted.");
+      setSelectedStrategyId("");
+      await invalidateAll();
+    },
+    onError: (error) => {
+      setMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Unable to delete strategy.");
+    },
+  });
+
+  const backtestMutation = useMutation({
+    mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
+    onSuccess: async (result) => {
+      setErrorMessage("");
       setMessage(`Backtest ${result.backtestRun.id} started.`);
       await invalidateAll();
     },
@@ -1217,7 +1231,8 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     saveStrategyMutation.isPending ||
     createStrategyMutation.isPending ||
     deleteStrategyMutation.isPending ||
-    backtestMutation.isPending;
+    backtestMutation.isPending ||
+    updateDemoBalanceMutation.isPending;
 
   const draftValidation = useMemo(() => (draft ? validateDraft(draft) : null), [draft]);
   const draftHasErrors = draftValidation ? hasDraftValidationErrors(draftValidation) : false;
@@ -1372,7 +1387,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     if (editorMode === "create") {
       setDraft(createUsableStrategyDraft(readOnlyStrategies.map((strategy) => strategy.id)));
       setDraftDirty(false);
-      setShowAdvancedOptions(false);
       return;
     }
     if (!selectedStrategy) return;
@@ -1422,6 +1436,14 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     setDraftStrategyId("");
     setDraftDirty(false);
     setShowAdvancedOptions(false);
+    setIsEditorModalOpen(true);
+  };
+
+  const openCreateStrategyEditor = (): void => {
+    setEditorMode("create");
+    setDraft(createUsableStrategyDraft(readOnlyStrategies.map((strategy) => strategy.id)));
+    setDraftStrategyId("");
+    setDraftDirty(false);
     setIsEditorModalOpen(true);
   };
 
@@ -1478,13 +1500,13 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
               disabled={busy || readOnlyStrategies.length === 0}
               className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60"
             >
-              Create Strategy
+              Create Usable Strategy
             </button>
           </div>
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Name", "Used Basic Strategies", "Mode", "Enabled", "Interval", "Actions"].map((heading) => (
+                {["Name", "Uses Basic", "Mode", "Enabled", "Interval", "Actions"].map((heading) => (
                   <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
                 ))}
               </tr>
@@ -1502,20 +1524,21 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
                     onClick={() => setSelectedStrategyId(strategy.id)}
                   >
                     <td className="py-3 px-4 text-left text-xs font-mono text-foreground">{strategy.name}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatUsedBaseStrategiesSummary(strategy)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{normalizeDraftExecutionMode(strategy)}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{(strategy.baseStrategies ?? []).join(", ") || "--"}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.executionMode}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono"><span className={strategy.isEnabled ? "text-positive" : "text-muted-foreground"}>{strategy.isEnabled ? "Yes" : "No"}</span></td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.scheduleInterval}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
                       <button
                         onClick={(event) => {
                           event.stopPropagation();
-                          runNowMutation.mutate(strategy.id);
+                          setSelectedStrategyId(strategy.id);
+                          setMessage(`Using strategy ${strategy.name}.`);
+                          setErrorMessage("");
                         }}
-                        disabled={busy}
                         className="px-2 py-1 mr-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
                       >
-                        Run Now
+                        Use
                       </button>
                       <button
                         onClick={(event) => {
@@ -1585,7 +1608,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
               <div className="flex gap-2">
                 <button onClick={closeStrategyEditor} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary">Close</button>
                 <button onClick={handleResetDraft} disabled={busy || !draftDirty} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
-                <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">{editorMode === "create" ? "Create Strategy" : "Save Changes"}</button>
+                <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">{editorMode === "create" ? "Create Strategy" : "Save Strategy"}</button>
               </div>
             </div>
         {draftHasErrors ? <div className="text-xs font-mono text-negative">Fix inline validation errors to enable save.</div> : null}

@@ -142,19 +142,18 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
   });
 
   router.delete("/strategies/:id", async (req, res) => {
-    const userScope = resolveStrategyUserScope(req);
-    const existing = await deps.repository.getStrategy(req.params.id, userScope);
+    const existing = await deps.repository.getStrategy(req.params.id);
     if (!existing) {
       sendNotFound(res, "Strategy", req.params.id);
       return;
     }
 
-    if (isBasicStrategyId(existing.id)) {
+    if (!existing.baseStrategies || existing.baseStrategies.length === 0) {
       res.status(400).json({ message: "Base read-only strategies cannot be deleted." });
       return;
     }
 
-    await deps.repository.deleteStrategy(req.params.id, userScope);
+    await deps.repository.deleteStrategy(req.params.id);
     res.json({ success: true });
   });
 

@@ -29,7 +29,7 @@ npm run dev
 
 ## Docker image build/push on commit
 
-This repo now includes a GitHub Actions workflow at `.github/workflows/docker-publish.yml` that builds and pushes multi-arch images on each commit push.
+This repo now includes a GitHub Actions workflow at `.github/workflows/docker-publish.yml` that builds and pushes ARM64 images on each commit push.
 
 Images pushed to Docker Hub:
 
@@ -52,3 +52,32 @@ Images pushed to Docker Hub:
 - Images are pushed to **two separate Docker Hub repositories** (not a single `mytrader` repo): `mytrader-backend` and `mytrader-frontend`.
 - The workflow now publishes **ARM64-only** images (`linux/arm64`), which matches Raspberry Pi 3B deployment targets.
 - The frontend container ships an Nginx SPA fallback (`try_files ... /index.html`) so direct deep-link routes work after deployment.
+
+## Raspberry Pi 3B+ deployment (Docker Compose)
+
+A ready-to-run Compose stack is provided at `deploy/pi/docker-compose.yml` for ARM64 deployments with:
+
+- `mikedim95/mytrader-backend:latest`
+- `mikedim95/mytrader-frontend:latest`
+- `mysql:8.0` (persistent volume)
+- `n8nio/n8n:latest` (persistent volume, configured to use MySQL)
+- `nickfedor/watchtower:latest` for automatic image update checks
+
+### Quick start on Pi
+
+```bash
+mkdir -p ~/mytrader && cd ~/mytrader
+curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO>/main/deploy/pi/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/<YOUR_GITHUB_USERNAME>/<YOUR_REPO>/main/deploy/pi/.env.example -o .env
+# edit .env values (especially passwords and PI_HOST_OR_IP)
+nano .env
+docker compose pull
+docker compose up -d
+```
+
+Endpoints after startup:
+
+- Frontend: `http://<PI_HOST_OR_IP>:8080`
+- Backend health: `http://<PI_HOST_OR_IP>:3001/api/health`
+- n8n: `http://<PI_HOST_OR_IP>:5678`
+
