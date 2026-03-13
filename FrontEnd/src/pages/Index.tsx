@@ -8,7 +8,7 @@ import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { NicehashPage } from "@/pages/NicehashPage";
-import type { PortfolioAccountType } from "@/types/api";
+import type { AppSession, PortfolioAccountType } from "@/types/api";
 
 const inactivePageMeta: Record<string, { title: string; description: string }> = {
   dashboard: {
@@ -29,7 +29,12 @@ const inactivePageMeta: Record<string, { title: string; description: string }> =
   },
 };
 
-const Index = () => {
+interface IndexProps {
+  session: AppSession;
+  onLogout: () => void;
+}
+
+const Index = ({ session, onLogout }: IndexProps) => {
   const [currentPage, setCurrentPage] = useState("portfolio");
   const [accountType, setAccountType] = useState<PortfolioAccountType>("demo");
 
@@ -63,7 +68,7 @@ const Index = () => {
     <div data-account-mode={accountType} className="app-shell flex h-screen bg-background overflow-hidden">
       <AppSidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar accountType={accountType} onAccountTypeChange={setAccountType} />
+        <TopBar accountType={accountType} onAccountTypeChange={setAccountType} session={session} onLogout={onLogout} />
         <main className="flex-1 overflow-y-auto">
           <div key={currentPage} className="page-enter">
             {renderPage()}

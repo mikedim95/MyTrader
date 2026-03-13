@@ -5,11 +5,13 @@ import { backendApi } from "@/lib/api";
 import { useDashboardData, useDemoAccountSettings } from "@/hooks/useTradingData";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { cn } from "@/lib/utils";
-import type { PortfolioAccountType } from "@/types/api";
+import type { AppSession, PortfolioAccountType } from "@/types/api";
 
 interface TopBarProps {
   accountType: PortfolioAccountType;
   onAccountTypeChange: (mode: PortfolioAccountType) => void;
+  session: AppSession;
+  onLogout: () => void;
 }
 
 function formatCurrency(value: number): string {
@@ -21,7 +23,16 @@ function formatUsdToken(value: number | undefined): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
-export function TopBar({ accountType, onAccountTypeChange }: TopBarProps) {
+function getUserInitials(username: string): string {
+  return username
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || "U";
+}
+
+export function TopBar({ accountType, onAccountTypeChange, session, onLogout }: TopBarProps) {
   const queryClient = useQueryClient();
   const { data, isPending } = useDashboardData(accountType);
   const { data: demoAccountData, isPending: loadingDemoAccount } = useDemoAccountSettings();
@@ -171,8 +182,22 @@ export function TopBar({ accountType, onAccountTypeChange }: TopBarProps) {
             <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
           </button>
 
-          <div className="h-8 w-8 rounded-md bg-secondary flex items-center justify-center">
-            <span className="text-xs font-mono font-semibold text-foreground">JD</span>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/40 px-3 py-1.5">
+            <div className="text-right">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                {session.storageMode === "offline" ? "Dummy Session" : "User Session"}
+              </div>
+              <div className="text-xs font-mono text-foreground">{session.username}</div>
+            </div>
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-secondary">
+              <span className="text-xs font-mono font-semibold text-foreground">{getUserInitials(session.username)}</span>
+            </div>
+            <button
+              onClick={onLogout}
+              className="rounded-md border border-border px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-muted-foreground transition hover:text-foreground"
+            >
+              Logout
+            </button>
           </div>
         </div>
       </header>

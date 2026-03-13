@@ -38,6 +38,33 @@ export interface ConnectionStatus {
   message?: string;
 }
 
+export type StrategyStorageMode = "database" | "offline";
+
+export interface DummyCredentialHint {
+  username: string;
+  password: string;
+}
+
+export interface SessionStatusResponse {
+  requiresLogin: boolean;
+  storageMode: StrategyStorageMode;
+  databaseAvailable: boolean;
+  message: string;
+  dummyCredentials?: DummyCredentialHint[];
+}
+
+export interface AppSession {
+  userId?: number;
+  username: string;
+  storageMode: StrategyStorageMode;
+  databaseAvailable: boolean;
+}
+
+export interface SessionLoginResponse {
+  session: AppSession;
+  status: SessionStatusResponse;
+}
+
 export interface DashboardResponse {
   connection: ConnectionStatus;
   assets: Asset[];

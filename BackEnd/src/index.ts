@@ -56,6 +56,10 @@ function parseDashboardAccountType(req: Request): "real" | "demo" {
   return rawValue === "demo" ? "demo" : "real";
 }
 
+function parseTextField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function buildSparklineFromChange(price: number, change24h: number): number[] {
   const previousPrice = Math.abs(100 + change24h) < 0.0001 ? price : price / (1 + change24h / 100);
   return Array.from({ length: 20 }, (_, index) => {
@@ -149,11 +153,59 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
+  const storage = await strategyRepository.getStorageStatus();
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
+    storage,
   });
+});
+
+app.get("/api/session/status", async (_req, res) => {
+  const storage = await strategyRepository.getStorageStatus();
+  res.json({
+    requiresLogin: true,
+    ...storage,
+  });
+});
+
+app.post("/api/session/login", async (req, res) => {
+  const username = parseTextField(req.body?.username);
+  const password = parseTextField(req.body?.password);
+
+  if (!username || !password) {
+    const storage = await strategyRepository.getStorageStatus();
+    res.status(400).json({
+      message: "Username and password are required.",
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+    return;
+  }
+
+  try {
+    const session = await strategyRepository.authenticateUser(username, password);
+    const storage = await strategyRepository.getStorageStatus();
+    res.json({
+      session,
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+  } catch (error) {
+    const storage = await strategyRepository.getStorageStatus();
+    res.status(401).json({
+      message: error instanceof Error ? error.message : "Unable to sign in.",
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+  }
 });
 
 app.get("/api/binance/connection", async (_req, res) => {
@@ -245,10 +297,7 @@ const server = app.listen(port, () => {
 });
 
 strategyScheduler.start().catch((error) => {
-  console.error(
-    "[strategy-scheduler] Failed to start:",
-    error instanceof Error ? error.message : error
-  );
+  console.error("[strategy-scheduler] Failed to start:", error);
 });
 
 const shutdown = (): void => {

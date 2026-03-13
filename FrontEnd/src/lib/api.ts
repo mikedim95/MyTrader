@@ -13,6 +13,8 @@ import type {
   NicehashOverviewResponse,
   OrdersResponse,
   PortfolioAccountType,
+  SessionLoginResponse,
+  SessionStatusResponse,
   StrategiesResponse,
   StrategyResponse,
   StrategyRunResponse,
@@ -20,30 +22,17 @@ import type {
   StrategyStateResponse,
   StrategyValidationResponse,
 } from "@/types/api";
+import { getStoredSession } from "@/lib/session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001";
 
 function resolveUserScope(): { userId?: number; username?: string } {
-  if (typeof window === "undefined") return {};
-
-  const params = new URLSearchParams(window.location.search);
-  const rawUserId = params.get("userId");
-  const userId = rawUserId ? Number.parseInt(rawUserId, 10) : Number.NaN;
-  if (Number.isInteger(userId) && userId > 0) {
-    return { userId };
+  const session = getStoredSession();
+  if (!session) return {};
+  if (typeof session.userId === "number") {
+    return { userId: session.userId };
   }
-
-  const userFromQuery = params.get("user") ?? params.get("username");
-  if (userFromQuery && userFromQuery.trim().length > 0) {
-    return { username: userFromQuery.trim().toLowerCase() };
-  }
-
-  const userFromStorage = window.localStorage.getItem("mytrader_user");
-  if (userFromStorage && userFromStorage.trim().length > 0) {
-    return { username: userFromStorage.trim().toLowerCase() };
-  }
-
-  return {};
+  return { username: session.username };
 }
 
 interface ConnectRequest {
@@ -108,7 +97,44 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+async function publicApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Content-Type", "application/json");
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const bodyText = await response.text();
+  const payload = parseJsonSafely(bodyText);
+
+  if (!response.ok) {
+    const message =
+      payload &&
+      typeof payload === "object" &&
+      "message" in payload &&
+      typeof (payload as { message: unknown }).message === "string"
+        ? (payload as { message: string }).message
+        : `Request failed with status ${response.status}`;
+
+    const error = new Error(message) as Error & {
+      responsePayload?: unknown;
+    };
+    error.responsePayload = payload;
+    throw error;
+  }
+
+  return payload as T;
+}
+
 export const backendApi = {
+  getSessionStatus: () => publicApiRequest<SessionStatusResponse>("/api/session/status"),
+  loginSession: (body: { username: string; password: string }) =>
+    publicApiRequest<SessionLoginResponse>("/api/session/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   getDashboard: (accountType: PortfolioAccountType = "real") =>
     apiRequest<DashboardResponse>(withQuery("/api/dashboard", { accountType })),
   getOrders: () => apiRequest<OrdersResponse>("/api/orders"),
