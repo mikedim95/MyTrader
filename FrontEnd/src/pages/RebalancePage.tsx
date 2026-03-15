@@ -88,19 +88,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     ]);
   };
 
-  const runNowMutation = useMutation({
-    mutationFn: (strategyId: string) => backendApi.runStrategyNow(strategyId, accountType),
-    onSuccess: async (result) => {
-      setErrorMessage("");
-      setMessage(`Strategy evaluation completed with status: ${result.run.status}. No trades were executed.`);
-      await invalidateRebalanceQueries();
-    },
-    onError: (error) => {
-      setMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "Unable to run strategy.");
-    },
-  });
-
   const executeRebalanceMutation = useMutation({
     mutationFn: (strategyId: string) => backendApi.executeStrategyRebalance(strategyId, accountType),
     onSuccess: async (result) => {
@@ -152,11 +139,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     return Array.from(new Set(combined));
   }, [executionPlan?.warnings, state?.warnings]);
 
-  const handleEvaluate = (): void => {
-    if (!selectedStrategy) return;
-    runNowMutation.mutate(selectedStrategy.id);
-  };
-
   const handleExecuteRebalance = (): void => {
     if (!selectedStrategy) return;
     executeRebalanceMutation.mutate(selectedStrategy.id);
@@ -168,7 +150,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     Boolean(selectedStrategy) &&
     rebalanceRequired &&
     !loadingState &&
-    !runNowMutation.isPending &&
     !executeRebalanceMutation.isPending;
 
   return (
@@ -177,7 +158,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
         <div>
           <h2 className="text-lg font-mono font-semibold text-foreground">Rebalance</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Evaluate strategy output, review the trade plan, and execute demo reallocations at current market prices.
+            Review the current trade plan and execute demo reallocations at current market prices.
           </p>
         </div>
 
@@ -196,14 +177,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
           </select>
 
           <button
-            onClick={handleEvaluate}
-            disabled={!selectedStrategy || runNowMutation.isPending || executeRebalanceMutation.isPending}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60"
-          >
-            Evaluate Now
-          </button>
-
-          <button
             onClick={handleExecuteRebalance}
             disabled={!canExecuteRebalance}
             className="px-4 py-2 rounded-md border border-border text-xs font-mono font-semibold text-foreground hover:bg-secondary disabled:opacity-60"
@@ -214,7 +187,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       </div>
 
       <div className="text-[11px] font-mono text-muted-foreground">
-        Evaluate only computes the plan. Execute applies the current target allocation to demo holdings using live market prices.
+        Strategy evaluation stays in Automation. Execute applies the current target allocation to demo holdings using live market prices.
       </div>
 
       {message ? (
