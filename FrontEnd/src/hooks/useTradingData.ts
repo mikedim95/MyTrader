@@ -92,6 +92,16 @@ export function useFleetLive() {
   });
 }
 
+export function useFleetHistory(limit = 120) {
+  return useQuery({
+    queryKey: ["fleet-history", limit],
+    queryFn: () => backendApi.getFleetHistory(limit),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
 export function useMiners() {
   return useQuery({
     queryKey: ["miners-list"],

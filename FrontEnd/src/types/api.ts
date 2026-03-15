@@ -157,6 +157,23 @@ export interface MinerHistoryPoint {
   fanPwm: number | null;
 }
 
+export interface FleetHistoryPoint {
+  timestamp: string;
+  online: boolean;
+  totalRateThs: number | null;
+  maxBoardTemp: number | null;
+  maxHotspotTemp: number | null;
+  maxTemp: number | null;
+  powerWatts: number | null;
+}
+
+export interface FleetHistorySeries {
+  minerId: number;
+  minerName: string;
+  minerIp: string;
+  points: FleetHistoryPoint[];
+}
+
 export interface MinerVerificationResult {
   reachable: boolean;
   httpOk: boolean;
@@ -230,6 +247,11 @@ export interface MinerPoolsResponse {
 
 export interface FleetLiveResponse {
   miners: MinerLiveData[];
+}
+
+export interface FleetHistoryResponse {
+  history: FleetHistorySeries[];
+  generatedAt: string;
 }
 
 export interface FleetOverviewResponse {

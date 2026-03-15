@@ -78,6 +78,46 @@ interface MinerApiDeps {
 export function createMinerRouter(deps: MinerApiDeps): Router {
   const router = Router();
 
+  const getMinerOrRespond = async (minerId: number, res: Response) => {
+    const miner = await deps.repository.getMinerById(minerId);
+    if (!miner) {
+      res.status(404).json({ message: `Miner ${minerId} not found.` });
+      return null;
+    }
+    return miner;
+  };
+
+  const proxyEnvelope = (minerId: number, data: unknown, latencyMs: number) => ({
+    ok: true,
+    minerId: String(minerId),
+    source: "vnish",
+    data,
+    fetchedAt: new Date().toISOString(),
+    latencyMs,
+  });
+
+  const proxyRead = async (
+    res: Response,
+    minerId: number,
+    path: string,
+    options?: { authenticated?: boolean }
+  ) => {
+    const miner = await getMinerOrRespond(minerId, res);
+    if (!miner) return;
+
+    const startedAt = Date.now();
+    try {
+      const data = await deps.readService.readPayload(miner, path, options);
+      res.json(proxyEnvelope(miner.id, data, Date.now() - startedAt));
+    } catch (error) {
+      res.status(502).json({
+        ok: false,
+        error: "upstream_error",
+        message: error instanceof Error ? error.message : `Failed to read ${path} from miner.`,
+      });
+    }
+  };
+
   const persistLiveRead = async (minerId: number) => {
     const miner = await deps.repository.getMinerById(minerId);
     if (!miner) {
@@ -284,6 +324,97 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
     })
   );
 
+  router.post(
+    "/miners/:id/test-connection",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+
+      const miner = await getMinerOrRespond(params.id, res);
+      if (!miner) return;
+
+      const startedAt = Date.now();
+      const verification = await deps.verifyService.verifyStoredMiner(miner, deps.cryptoService.decrypt(miner.passwordEnc));
+      res.json({
+        ok: verification.result.reachable,
+        latencyMs: Date.now() - startedAt,
+        details: verification.result,
+      });
+    })
+  );
+
+  router.get(
+    "/miners/:id/status",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/status");
+    })
+  );
+
+  router.get(
+    "/miners/:id/info",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/info");
+    })
+  );
+
+  router.get(
+    "/miners/:id/summary",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/summary");
+    })
+  );
+
+  router.get(
+    "/miners/:id/perf-summary",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/perf-summary");
+    })
+  );
+
+  router.get(
+    "/miners/:id/chips",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/chips");
+    })
+  );
+
+  router.get(
+    "/miners/:id/layout",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/layout");
+    })
+  );
+
+  router.get(
+    "/miners/:id/settings",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/settings", { authenticated: true });
+    })
+  );
+
+  router.get(
+    "/miners/:id/autotune-presets",
+    asyncHandler(async (req, res) => {
+      const params = parseOrRespond(idParamSchema, req.params, res);
+      if (!params) return;
+      await proxyRead(res, params.id, "/autotune/presets", { authenticated: true });
+    })
+  );
+
   router.get(
     "/miners/:id/history",
     asyncHandler(async (req, res) => {
@@ -333,6 +464,51 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
       );
 
       res.json({ miners: fleet });
+    })
+  );
+
+  router.get(
+    "/fleet/history",
+    asyncHandler(async (req, res) => {
+      const query = parseOrRespond(historyQuerySchema, req.query, res);
+      if (!query) return;
+
+      const miners = await deps.repository.listMiners();
+      const history = await Promise.all(
+        miners.map(async (miner) => {
+          const snapshots = await deps.repository.listHistory(miner.id, query.limit);
+          const points = [...snapshots]
+            .reverse()
+            .map((snapshot) => {
+              const boardTemps = snapshot.boardTemps.filter((value): value is number => typeof value === "number");
+              const hotspotTemps = snapshot.hotspotTemps.filter((value): value is number => typeof value === "number");
+              const maxBoardTemp = boardTemps.length > 0 ? Math.max(...boardTemps) : null;
+              const maxHotspotTemp = hotspotTemps.length > 0 ? Math.max(...hotspotTemps) : null;
+
+              return {
+                timestamp: snapshot.createdAt,
+                online: snapshot.online,
+                totalRateThs: snapshot.totalRateThs,
+                maxBoardTemp,
+                maxHotspotTemp,
+                maxTemp: maxHotspotTemp ?? maxBoardTemp,
+                powerWatts: snapshot.powerWatts,
+              };
+            });
+
+          return {
+            minerId: miner.id,
+            minerName: miner.name,
+            minerIp: miner.ip,
+            points,
+          };
+        })
+      );
+
+      res.json({
+        history: history.filter((series) => series.points.length > 0),
+        generatedAt: new Date().toISOString(),
+      });
     })
   );
 

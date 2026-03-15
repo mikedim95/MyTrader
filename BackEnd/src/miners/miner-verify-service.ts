@@ -1,5 +1,6 @@
 import { MinerCgminerClient } from "./miner-cgminer-client.js";
 import { MinerHttpClient } from "./miner-http-client.js";
+import { extractMinerIdentity, extractPresetDetails } from "./miner-normalizer.js";
 import { buildApiBaseUrl, cleanString, parseJsonObject } from "./miner-utils.js";
 import { MinerEntity, MinerVerificationResult, MinerVerifyDraftInput } from "./types.js";
 
@@ -33,6 +34,8 @@ export class MinerVerifyService {
     let error: string | null = null;
     let statusPayload: Record<string, unknown> | null = null;
     let perfSummaryPayload: Record<string, unknown> | null = null;
+    let summaryPayload: Record<string, unknown> | null = null;
+    let infoPayload: Record<string, unknown> | null = null;
     let presets: unknown[] = [];
     let summary: Record<string, unknown> | null = null;
     let stats: Record<string, unknown> | null = null;
@@ -74,6 +77,20 @@ export class MinerVerifyService {
       }
     }
 
+    try {
+      summaryPayload = await this.httpClient.get<Record<string, unknown>>(apiBaseUrl, "/summary");
+      httpOk = true;
+    } catch {
+      // Optional payload for richer normalization.
+    }
+
+    try {
+      infoPayload = await this.httpClient.get<Record<string, unknown>>(apiBaseUrl, "/info");
+      httpOk = true;
+    } catch {
+      // Optional payload for richer normalization.
+    }
+
     if (unlockOk) {
       try {
         presets = await this.httpClient.get<unknown[]>(apiBaseUrl, "/autotune/presets", unlockToken ?? undefined);
@@ -92,6 +109,14 @@ export class MinerVerifyService {
       canReadPresets: unlockOk && presets.length > 0,
     };
 
+    const presetDetails = extractPresetDetails(perfSummaryPayload);
+    const identity = extractMinerIdentity({
+      statusPayload,
+      summaryPayload,
+      infoPayload,
+      cgminerStats: stats,
+    });
+
     return {
       apiBaseUrl,
       result: {
@@ -102,14 +127,13 @@ export class MinerVerifyService {
         minerState:
           cleanString(statusPayload?.state) ??
           cleanString(statusPayload?.miner_state) ??
+          cleanString(summaryPayload?.state) ??
+          cleanString(parseJsonObject(summaryPayload)?.miner_state) ??
           cleanString(statusPayload?.status) ??
           null,
-        currentPreset:
-          cleanString(perfSummaryPayload?.preset_name) ??
-          cleanString(perfSummaryPayload?.presetName) ??
-          null,
-        model: cleanString(statusPayload?.model) ?? cleanString(statusPayload?.miner) ?? null,
-        firmware: cleanString(statusPayload?.firmware) ?? cleanString(statusPayload?.fw_name) ?? null,
+        currentPreset: presetDetails.name,
+        model: identity.model,
+        firmware: identity.firmware,
         capabilities,
         presets: presets
           .map((entry) => {

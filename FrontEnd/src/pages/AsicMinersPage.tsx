@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2, RefreshCcw } from "lucide-react";
 import { backendApi } from "@/lib/api";
-import { useFleetLive, useFleetOverview, useMinerDetails, useMinerHistory, useMiners } from "@/hooks/useTradingData";
+import { useFleetHistory, useFleetLive, useFleetOverview, useMinerDetails, useMinerHistory, useMiners } from "@/hooks/useTradingData";
 import { FleetOverviewCards } from "@/components/miners/FleetOverviewCards";
+import { FleetHistoryCharts } from "@/components/miners/FleetHistoryCharts";
 import { MinerTable } from "@/components/miners/MinerTable";
 import { MinerDetailPanel } from "@/components/miners/MinerDetailPanel";
 import { AddMinerDialog } from "@/components/miners/AddMinerDialog";
@@ -19,6 +20,7 @@ export function AsicMinersPage() {
   const [draftVerification, setDraftVerification] = useState<MinerVerificationResult | null>(null);
 
   const { data: overviewData, isPending: loadingOverview } = useFleetOverview();
+  const { data: historyData, isPending: loadingHistory } = useFleetHistory(120);
   const { data: fleetData, isPending: loadingFleet, error: fleetError } = useFleetLive();
   const { data: minersData, isPending: loadingMiners } = useMiners();
   const { data: selectedMinerDetails } = useMinerDetails(selectedMinerId);
@@ -27,6 +29,7 @@ export function AsicMinersPage() {
   const invalidateMinerQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["fleet-overview"] }),
+      queryClient.invalidateQueries({ queryKey: ["fleet-history", 120] }),
       queryClient.invalidateQueries({ queryKey: ["fleet-live"] }),
       queryClient.invalidateQueries({ queryKey: ["miners-list"] }),
       queryClient.invalidateQueries({ queryKey: ["miner-details", selectedMinerId] }),
@@ -145,6 +148,8 @@ export function AsicMinersPage() {
           </div>
         </div>
       ) : null}
+
+      <FleetHistoryCharts history={historyData?.history ?? []} isLoading={loadingHistory} />
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="mb-4 flex items-center justify-between">

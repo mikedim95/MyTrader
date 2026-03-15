@@ -9,6 +9,7 @@ import type {
   CreateBacktestResponse,
   CreateMinerResponse,
   DashboardResponse,
+  FleetHistoryResponse,
   ExecutionPlanResponse,
   FleetLiveResponse,
   FleetOverviewResponse,
@@ -36,7 +37,7 @@ import type {
 } from "@/types/api";
 import { getStoredSession } from "@/lib/session";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
+const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "").replace(/\/+$/, "");
 
 function resolveUserScope(): { userId?: number; username?: string } {
   const session = getStoredSession();
@@ -193,6 +194,7 @@ export const backendApi = {
     apiRequest<MinerHistoryResponse>(withQuery(`/api/miners/${minerId}/history`, { limit: String(limit) })),
   getMinerPools: (minerId: number) => apiRequest<MinerPoolsResponse>(`/api/miners/${minerId}/pools`),
   getFleetLive: () => apiRequest<FleetLiveResponse>("/api/fleet/live"),
+  getFleetHistory: (limit = 120) => apiRequest<FleetHistoryResponse>(withQuery("/api/fleet/history", { limit: String(limit) })),
   getFleetOverview: () => apiRequest<FleetOverviewResponse>("/api/fleet/overview"),
   restartMiner: (minerId: number) =>
     apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/restart`, {

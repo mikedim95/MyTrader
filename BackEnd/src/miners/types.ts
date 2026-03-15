@@ -215,6 +215,23 @@ export interface MinerHistoryPoint {
   fanPwm: number | null;
 }
 
+export interface FleetHistoryPoint {
+  timestamp: string;
+  online: boolean;
+  totalRateThs: number | null;
+  maxBoardTemp: number | null;
+  maxHotspotTemp: number | null;
+  maxTemp: number | null;
+  powerWatts: number | null;
+}
+
+export interface FleetHistorySeries {
+  minerId: number;
+  minerName: string;
+  minerIp: string;
+  points: FleetHistoryPoint[];
+}
+
 export interface MinerCreateInput {
   name: string;
   ip: string;
@@ -297,6 +314,12 @@ export interface MinerPerfSummaryPayload {
   preset_name?: string;
   preset_pretty?: string;
   preset_status?: string;
+  current_preset?: {
+    name?: string;
+    pretty?: string;
+    status?: string;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -306,8 +329,14 @@ export interface MinerReadResult {
   cgminerOk: boolean;
   statusPayload: MinerHttpStatusPayload | null;
   perfSummaryPayload: MinerPerfSummaryPayload | null;
+  summaryPayload: Record<string, unknown> | null;
+  infoPayload: Record<string, unknown> | null;
+  chipsPayload: unknown | null;
+  layoutPayload: unknown | null;
+  settingsPayload: unknown | null;
   cgminerSummary: Record<string, unknown> | null;
   cgminerStats: Record<string, unknown> | null;
+  cgminerDevs: unknown[];
   cgminerPools: unknown[];
   presets: unknown[] | null;
 }
