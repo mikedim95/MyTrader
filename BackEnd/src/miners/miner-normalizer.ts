@@ -56,6 +56,23 @@ function readField(record: Record<string, unknown>, ...keys: string[]): unknown 
   return undefined;
 }
 
+function firstParsedValue<T>(
+  record: Record<string, unknown> | null | undefined,
+  keys: string[],
+  parser: (value: unknown) => T | null
+): T | null {
+  if (!record) return null;
+
+  for (const key of keys) {
+    const parsed = parser(readField(record, key));
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 function cleanBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
@@ -102,23 +119,19 @@ function parsePowerWattsFromPresetPretty(value: string | null): number | null {
 }
 
 function firstNumber(record: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
-  if (!record) return null;
-  return cleanNumber(readField(record, ...keys));
+  return firstParsedValue(record, keys, cleanNumber);
 }
 
 function firstInteger(record: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
-  if (!record) return null;
-  return cleanInteger(readField(record, ...keys));
+  return firstParsedValue(record, keys, cleanInteger);
 }
 
 function firstTemperature(record: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
-  if (!record) return null;
-  return cleanTemperature(readField(record, ...keys));
+  return firstParsedValue(record, keys, cleanTemperature);
 }
 
 function firstString(record: Record<string, unknown> | null | undefined, ...keys: string[]): string | null {
-  if (!record) return null;
-  return cleanString(readField(record, ...keys));
+  return firstParsedValue(record, keys, cleanString);
 }
 
 function readHashrateAsThs(record: Record<string, unknown>): number | null {
@@ -179,19 +192,19 @@ function readHashrateAsThs(record: Record<string, unknown>): number | null {
 
 function collectNumbers(records: Record<string, unknown>[], keys: string[]): number[] {
   return records
-    .map((record) => cleanNumber(readField(record, ...keys)))
+    .map((record) => firstParsedValue(record, keys, cleanNumber))
     .filter((value): value is number => value !== null);
 }
 
 function collectIntegers(records: Record<string, unknown>[], keys: string[]): number[] {
   return records
-    .map((record) => cleanInteger(readField(record, ...keys)))
+    .map((record) => firstParsedValue(record, keys, cleanInteger))
     .filter((value): value is number => value !== null);
 }
 
 function collectTemperatures(records: Record<string, unknown>[], keys: string[]): number[] {
   return records
-    .map((record) => cleanTemperature(readField(record, ...keys)))
+    .map((record) => firstParsedValue(record, keys, cleanTemperature))
     .filter((value): value is number => value !== null);
 }
 
@@ -205,9 +218,27 @@ function collectTemperatureLists(records: Record<string, unknown>[], keys: strin
   );
 }
 
+function collectPerRecordTemperatures(records: Record<string, unknown>[], keys: string[]): number[] {
+  return records
+    .map((record) => firstParsedValue(record, keys, cleanTemperature))
+    .filter((value): value is number => value !== null);
+}
+
+function collectPerChainSensorMaxTemperatures(chainRecords: Record<string, unknown>[], sensorPath: string): number[] {
+  return chainRecords
+    .map((chainRecord) => {
+      const chipRecords = recordsFromUnknown(readField(chainRecord, "chips"));
+      const temps = chipRecords
+        .map((chipRecord) => firstParsedValue(chipRecord, [sensorPath], cleanTemperature))
+        .filter((value): value is number => value !== null);
+      return temps.length > 0 ? Math.max(...temps) : null;
+    })
+    .filter((value): value is number => value !== null);
+}
+
 function collectStrings(records: Record<string, unknown>[], keys: string[]): string[] {
   return records
-    .map((record) => cleanString(readField(record, ...keys)))
+    .map((record) => firstParsedValue(record, keys, cleanString))
     .filter((value): value is string => value !== null);
 }
 
@@ -427,6 +458,40 @@ export function normalizeMinerLiveData(params: {
     ...chipsChains,
     ...devRecords,
   ];
+  const chainBoardTemps = arrayOfNumbers([
+    ...collectPerRecordTemperatures(statusChains, [
+      "pcb_temp.max",
+      "board_temp.max",
+      "pcb_temp",
+      "board_temp",
+      "sensor.pcb_temp",
+    ]),
+    ...collectPerRecordTemperatures(summaryChains, [
+      "pcb_temp.max",
+      "board_temp.max",
+      "pcb_temp",
+      "board_temp",
+      "sensor.pcb_temp",
+    ]),
+  ]);
+  const chainHotspotTemps = arrayOfNumbers([
+    ...collectPerRecordTemperatures(statusChains, [
+      "chip_temp.max",
+      "hotspot_temp.max",
+      "chip_temp",
+      "hotspot_temp",
+      "sensor.chip_temp",
+    ]),
+    ...collectPerRecordTemperatures(summaryChains, [
+      "chip_temp.max",
+      "hotspot_temp.max",
+      "chip_temp",
+      "hotspot_temp",
+      "sensor.chip_temp",
+    ]),
+  ]);
+  const sensorBoardTemps = collectPerChainSensorMaxTemperatures(chipsChains, "sensor.pcb_temp");
+  const sensorHotspotTemps = collectPerChainSensorMaxTemperatures(chipsChains, "sensor.chip_temp");
 
   const totalRateThs =
     normalizeHashrateToThs(cleanNumber(cgminerStats ? readField(cgminerStats, "total_rate", "Total Rate") : undefined)) ??
@@ -435,65 +500,77 @@ export function normalizeMinerLiveData(params: {
     normalizeHashrateToThs(firstNumber(summaryMiner, "hashrate_ths", "total_hashrate_ths")) ??
     (summaryMiner ? readHashrateAsThs(summaryMiner) : null);
 
-  const boardTemps = arrayOfNumbers([
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_1") : undefined),
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_2") : undefined),
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_3") : undefined),
-    ...collectTemperatures(thermalRecords, [
-      "board_temp",
-      "boardTemp",
-      "temp_board",
-      "pcb_temp",
-      "pcb_temp.max",
-      "pcb_temp.min",
-      "temp_pcb",
-      "sensor.pcb_temp",
-      "Temperature",
-      "Temp",
-      "temperature",
-      "temperature.board",
-      "board.temperature",
-      "temperature.pcb",
-    ]),
-    ...collectTemperatureLists(thermalRecords, [
-      "board_temps",
-      "boardTemps",
-      "temperature.board",
-      "temperature.pcb",
-      "pcb_temps",
-      "pcbTemps",
-    ]),
-  ]);
+  const boardTemps =
+    chainBoardTemps.length > 0
+      ? chainBoardTemps
+      : sensorBoardTemps.length > 0
+        ? sensorBoardTemps
+        : arrayOfNumbers([
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_1") : undefined),
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_2") : undefined),
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_3") : undefined),
+            ...collectTemperatures(thermalRecords, [
+              "pcb_temp.max",
+              "board_temp.max",
+              "board_temp",
+              "boardTemp",
+              "temp_board",
+              "pcb_temp",
+              "pcb_temp.min",
+              "temp_pcb",
+              "sensor.pcb_temp",
+              "Temperature",
+              "Temp",
+              "temperature",
+              "temperature.board",
+              "board.temperature",
+              "temperature.pcb",
+            ]),
+            ...collectTemperatureLists(thermalRecords, [
+              "board_temps",
+              "boardTemps",
+              "temperature.board",
+              "temperature.pcb",
+              "pcb_temps",
+              "pcbTemps",
+            ]),
+          ]);
 
-  const hotspotTemps = arrayOfNumbers([
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_1") : undefined),
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_2") : undefined),
-    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_3") : undefined),
-    ...collectTemperatures(thermalRecords, [
-      "hotspot_temp",
-      "hotspotTemp",
-      "chip_temp",
-      "chip_temp.max",
-      "chip_temp.min",
-      "chip_temp_max",
-      "max_chip_temp",
-      "Chip Temp Max",
-      "sensor.chip_temp",
-      "temperature.max",
-      "temp_max",
-      "temperature.hotspot",
-      "temperature.chip",
-    ]),
-    ...collectTemperatureLists(thermalRecords, [
-      "hotspot_temps",
-      "hotspotTemps",
-      "chip_temps",
-      "chipTemps",
-      "temperature.max",
-      "temperature.hotspot",
-      "temperature.chip",
-    ]),
-  ]);
+  const hotspotTemps =
+    chainHotspotTemps.length > 0
+      ? chainHotspotTemps
+      : sensorHotspotTemps.length > 0
+        ? sensorHotspotTemps
+        : arrayOfNumbers([
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_1") : undefined),
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_2") : undefined),
+            cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_3") : undefined),
+            ...collectTemperatures(thermalRecords, [
+              "chip_temp.max",
+              "hotspot_temp.max",
+              "hotspot_temp",
+              "hotspotTemp",
+              "chip_temp",
+              "chip_temp.min",
+              "chip_temp_max",
+              "max_chip_temp",
+              "Chip Temp Max",
+              "sensor.chip_temp",
+              "temperature.max",
+              "temp_max",
+              "temperature.hotspot",
+              "temperature.chip",
+            ]),
+            ...collectTemperatureLists(thermalRecords, [
+              "hotspot_temps",
+              "hotspotTemps",
+              "chip_temps",
+              "chipTemps",
+              "temperature.max",
+              "temperature.hotspot",
+              "temperature.chip",
+            ]),
+          ]);
 
   const chipTempStrings = [
     ...[1, 2, 3]
@@ -605,7 +682,7 @@ export function normalizeMinerLiveData(params: {
     powerWatts:
       (powerFromChains > 0 ? Math.round(powerFromChains) : null) ??
       (powerFromThermals > 0 ? Math.round(powerFromThermals) : null) ??
-      firstInteger(summaryMiner, "power_usage", "power", "power_watts", "consumption") ??
+      firstInteger(summaryMiner, "power_usage", "power_consumption", "power", "power_watts", "consumption") ??
       presetDetails.powerWattsHint,
     poolActiveIndex: activePoolIndex,
     pools,
