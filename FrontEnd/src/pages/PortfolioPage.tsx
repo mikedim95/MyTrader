@@ -127,7 +127,11 @@ export function PortfolioPage({ accountType, onSelectAsset }: PortfolioPageProps
           </table>
 
           {!isLoading && assets.length === 0 ? (
-            <div className="px-5 py-6 text-sm text-muted-foreground">No live holdings found for the connected account.</div>
+            <div className="px-5 py-6 text-sm text-muted-foreground">
+              {accountType === "demo"
+                ? "Demo account not initialized yet. Use the top bar to choose your starting capital and asset mix."
+                : "No live holdings found for the connected account."}
+            </div>
           ) : null}
         </div>
 

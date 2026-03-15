@@ -7,6 +7,7 @@ import { mergeStrategyUpdate, validateStrategyDsl } from "./strategy-dsl-parser.
 import { StrategyRepository } from "./strategy-repository.js";
 import { StrategyRunner } from "./strategy-runner.js";
 import { parseScheduleIntervalToMs } from "./allocation-utils.js";
+import { createDemoAccountHoldings } from "./portfolio-state-service.js";
 import { PortfolioAccountType } from "./types.js";
 import { isBasicStrategyId } from "./strategy-catalog.js";
 import { resolveStrategyUserScope } from "./strategy-user-scope.js";
@@ -33,6 +34,17 @@ const backtestRequestSchema = z.object({
 const accountTypeSchema = z.enum(["real", "demo"]);
 const demoAccountBalanceSchema = z.object({
   balance: z.number().finite().positive(),
+});
+const demoAccountInitializeSchema = z.object({
+  balance: z.number().finite().positive(),
+  allocations: z
+    .array(
+      z.object({
+        symbol: z.string().min(1),
+        percent: z.number().finite().positive(),
+      })
+    )
+    .min(1),
 });
 
 interface StrategyApiDeps {
@@ -75,6 +87,38 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
 
     const userScope = resolveStrategyUserScope(req);
     const demoAccount = await deps.repository.setDemoAccountBalance(parsed.data.balance, userScope);
+    res.json({ demoAccount });
+  });
+
+  router.post("/strategy-settings/demo-account/initialize", async (req, res) => {
+    const parsed = demoAccountInitializeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid demo account initialization payload.", errors: parsed.error.issues });
+      return;
+    }
+
+    const allocations = parsed.data.allocations.reduce<Record<string, number>>((acc, entry) => {
+      const symbol = entry.symbol.trim().toUpperCase();
+      if (!symbol) return acc;
+      acc[symbol] = (acc[symbol] ?? 0) + entry.percent;
+      return acc;
+    }, {});
+
+    const totalPercent = Object.values(allocations).reduce((sum, value) => sum + value, 0);
+    if (Math.abs(totalPercent - 100) > 0.0001) {
+      res.status(400).json({ message: "Allocation percentages must total exactly 100%." });
+      return;
+    }
+
+    const userScope = resolveStrategyUserScope(req);
+    const holdings = await createDemoAccountHoldings("USDC", parsed.data.balance, allocations);
+    const demoAccount = await deps.repository.initializeDemoAccount(parsed.data.balance, holdings, userScope);
+    res.status(201).json({ demoAccount });
+  });
+
+  router.delete("/strategy-settings/demo-account", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const demoAccount = await deps.repository.resetDemoAccount(userScope);
     res.json({ demoAccount });
   });
 

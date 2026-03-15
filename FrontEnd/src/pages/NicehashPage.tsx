@@ -269,7 +269,7 @@ export function NicehashPage() {
                   </td>
                   <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
                     <div className="inline-flex flex-col items-end gap-1">
-                      <MinerStatusBadge status={toMinerStatus(miner.status)} />
+                      <MinerStatusBadge online={toMinerStatus(miner.status) === "Online"} minerState={miner.status} />
                       <span className="text-[10px] text-muted-foreground">{miner.status}</span>
                     </div>
                   </td>

@@ -5,6 +5,7 @@ import type {
   BacktestTimelineResponse,
   BacktestsResponse,
   ConnectionStatus,
+  DemoAccountInitializeRequest,
   DemoAccountSettingsResponse,
   CreateBacktestResponse,
   CreateMinerResponse,
@@ -263,6 +264,15 @@ export const backendApi = {
     apiRequest<DemoAccountSettingsResponse>("/api/strategy-settings/demo-account", {
       method: "PUT",
       body: JSON.stringify({ balance }),
+    }),
+  initializeDemoAccount: (body: DemoAccountInitializeRequest) =>
+    apiRequest<DemoAccountSettingsResponse>("/api/strategy-settings/demo-account/initialize", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  resetDemoAccount: () =>
+    apiRequest<DemoAccountSettingsResponse>("/api/strategy-settings/demo-account", {
+      method: "DELETE",
     }),
 
   getStrategies: () => apiRequest<StrategiesResponse>("/api/strategies"),

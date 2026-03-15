@@ -96,7 +96,7 @@ export function AddMinerDialog({ isVerifying, isSaving, verification, onVerify, 
                   ["CGMiner socket reachable", verification.cgminerOk],
                   ["Password valid", verification.unlockOk],
                 ].map(([label, ok]) => (
-                  <div key={label} className="flex items-center justify-between rounded-md border border-border bg-background/60 px-3 py-2">
+                  <div key={String(label)} className="flex items-center justify-between rounded-md border border-border bg-background/60 px-3 py-2">
                     <span className="font-mono text-xs text-foreground">{label}</span>
                     {ok ? <ShieldCheck className="h-4 w-4 text-positive" /> : <ShieldX className="h-4 w-4 text-negative" />}
                   </div>

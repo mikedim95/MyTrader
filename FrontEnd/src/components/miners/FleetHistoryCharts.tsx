@@ -211,7 +211,7 @@ function ChartCard({
               formatter={(value: number, name: string) => [`${value.toFixed(metric === "totalRateThs" ? 2 : 1)} ${unit}`, name]}
             />
             <Legend wrapperStyle={{ fontFamily: "IBM Plex Mono", fontSize: "11px", paddingTop: "10px" }} />
-            {seriesMeta.map((series) => (
+            {seriesMeta.map((series, idx) => (
               <Line
                 key={series.key}
                 type="monotone"
@@ -221,7 +221,9 @@ function ChartCard({
                 strokeWidth={2}
                 dot={false}
                 connectNulls={false}
-                isAnimationActive={false}
+                isAnimationActive={true}
+                animationDuration={1200 + idx * 200}
+                animationEasing="ease-out"
               />
             ))}
             {rows.length > 1 ? (

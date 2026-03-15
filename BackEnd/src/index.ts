@@ -35,7 +35,7 @@ import {
 } from "./portfolioService.js";
 import type { DashboardResponse } from "./types.js";
 import { BacktestEngine } from "./strategy/backtest-engine.js";
-import { createDemoAccountHoldings, getDemoPortfolioState } from "./strategy/portfolio-state-service.js";
+import { getDemoPortfolioState } from "./strategy/portfolio-state-service.js";
 import { StrategyRepository } from "./strategy/strategy-repository.js";
 import { StrategyRunner } from "./strategy/strategy-runner.js";
 import { StrategyScheduler } from "./strategy/strategy-scheduler.js";
@@ -96,20 +96,14 @@ function requireUserScope(req: Request, res: Response): StrategyUserScope | null
 }
 
 async function resolveDemoAccountSettings(userScope?: StrategyUserScope) {
-  let demoAccount = await strategyRepository.getDemoAccountSettings(userScope);
-  if (demoAccount.holdings.length > 0) {
-    return demoAccount;
-  }
-
-  const holdings = await createDemoAccountHoldings("USDC", demoAccount.balance);
-  demoAccount = await strategyRepository.setDemoAccountHoldings(holdings, userScope);
-  return demoAccount;
+  return strategyRepository.getDemoAccountSettings(userScope);
 }
 
 async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<DashboardResponse> {
   const demoAccount = await resolveDemoAccountSettings(userScope);
   const portfolio = await getDemoPortfolioState("USDC", { demoAccount });
   const generatedAt = portfolio.timestamp;
+  const demoInitialized = demoAccount.holdings.length > 0;
   const targetAllocationBySymbol = new Map(
     demoAccount.holdings.map((holding) => [holding.symbol.toUpperCase(), holding.targetAllocation])
   );
@@ -181,10 +175,12 @@ async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<Dash
 
   return {
     connection: {
-      connected: true,
+      connected: demoInitialized,
       source: "none",
       testnet: false,
-      message: "Demo mode uses simulated holdings and live market prices.",
+      message: demoInitialized
+        ? "Demo mode uses your saved simulated holdings and live market prices."
+        : "Demo account not initialized yet. Set your starting capital and allocation to begin.",
     },
     assets,
     totalPortfolioValue,

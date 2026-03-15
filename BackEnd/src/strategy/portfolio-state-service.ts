@@ -2,7 +2,13 @@ import { getDashboardData, getTickerSnapshot } from "../portfolioService.js";
 import { allocationFromAssetValues } from "./asset-groups.js";
 import { normalizeAllocation, round } from "./allocation-utils.js";
 import type { StrategyUserScope } from "./strategy-user-scope.js";
-import { DemoAccountHolding, DemoAccountSettings, PortfolioAccountType, PortfolioState } from "./types.js";
+import {
+  DemoAccountAllocationInput,
+  DemoAccountHolding,
+  DemoAccountSettings,
+  PortfolioAccountType,
+  PortfolioState,
+} from "./types.js";
 
 const DEFAULT_DEMO_CAPITAL = 10_000;
 const DEFAULT_DEMO_ALLOCATION = "BTC:40,ETH:30,BNB:10,USDC:20";
@@ -60,13 +66,47 @@ function normalizeHoldings(holdings: DemoAccountHolding[] | undefined): DemoAcco
     .filter((holding) => holding.symbol.length > 0 && holding.quantity > 0);
 }
 
+function allocationMapFromInput(
+  allocations: DemoAccountAllocationInput[] | Record<string, number> | undefined,
+  normalizedBase: string
+): Record<string, number> | null {
+  if (!allocations) return null;
+
+  const rawMap: Record<string, number> = {};
+
+  if (Array.isArray(allocations)) {
+    allocations.forEach((entry) => {
+      const symbol = normalizeSymbol(entry.symbol);
+      const percent = Number(entry.percent);
+      if (!symbol || !Number.isFinite(percent) || percent < 0) return;
+      rawMap[symbol] = (rawMap[symbol] ?? 0) + percent;
+    });
+  } else {
+    Object.entries(allocations).forEach(([symbol, percent]) => {
+      const normalizedSymbol = normalizeSymbol(symbol);
+      const safePercent = Number(percent);
+      if (!normalizedSymbol || !Number.isFinite(safePercent) || safePercent < 0) return;
+      rawMap[normalizedSymbol] = (rawMap[normalizedSymbol] ?? 0) + safePercent;
+    });
+  }
+
+  if (Object.keys(rawMap).length === 0) {
+    return { [normalizedBase]: 100 };
+  }
+
+  return normalizeAllocation(rawMap);
+}
+
 export async function createDemoAccountHoldings(
   baseCurrency = "USDC",
-  demoCapitalOverride?: number
+  demoCapitalOverride?: number,
+  allocationOverride?: DemoAccountAllocationInput[] | Record<string, number>
 ): Promise<DemoAccountHolding[]> {
   const normalizedBase = normalizeSymbol(baseCurrency || "USDC");
   const demoCapital = getResolvedDemoCapital(demoCapitalOverride);
-  const targetAllocation = parseDemoAllocation(process.env.DEMO_ACCOUNT_ALLOCATION, normalizedBase);
+  const targetAllocation =
+    allocationMapFromInput(allocationOverride, normalizedBase) ??
+    parseDemoAllocation(process.env.DEMO_ACCOUNT_ALLOCATION, normalizedBase);
   const symbols = Array.from(new Set([...Object.keys(targetAllocation), normalizedBase]));
 
   const tickerEntries = await Promise.all(
@@ -169,9 +209,8 @@ export async function getDemoPortfolioState(
   options?: { demoCapital?: number; demoAccount?: DemoAccountSettings }
 ): Promise<PortfolioState> {
   const normalizedBase = normalizeSymbol(baseCurrency || "USDC");
-  const demoCapital = getResolvedDemoCapital(options?.demoCapital, options?.demoAccount);
   const savedHoldings = normalizeHoldings(options?.demoAccount?.holdings);
-  const holdings = savedHoldings.length > 0 ? savedHoldings : await createDemoAccountHoldings(normalizedBase, demoCapital);
+  const holdings = savedHoldings.length > 0 ? savedHoldings : [];
   const symbols = Array.from(new Set(holdings.map((holding) => holding.symbol)));
 
   const tickerEntries = await Promise.all(
@@ -209,18 +248,6 @@ export async function getDemoPortfolioState(
       };
     })
     .filter((asset) => asset.quantity > 0);
-
-  if (assets.length === 0) {
-    assets.push({
-      symbol: normalizedBase,
-      quantity: round(demoCapital, 10),
-      price: 1,
-      value: round(demoCapital, 2),
-      allocation: 0,
-      change24h: 0,
-      volume24h: 0,
-    });
-  }
 
   const totalValue = assets.reduce((sum, asset) => sum + asset.value, 0);
   const allocation = normalizeAllocation(

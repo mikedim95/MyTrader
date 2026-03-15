@@ -63,6 +63,7 @@
     --accent: 340 100% 62%;
     --sidebar-primary: 168 100% 48%;
     --sidebar-ring: 168 100% 48%;
+    --mode-glow: 168 100% 48%;
   }
 
   [data-account-mode="real"] {
@@ -71,6 +72,8 @@
     --accent: 42 100% 62%;
     --sidebar-primary: 30 100% 60%;
     --sidebar-ring: 30 100% 60%;
+    --positive: 30 100% 60%;
+    --mode-glow: 30 100% 60%;
   }
 }
 
@@ -86,14 +89,14 @@
 
   .app-shell {
     background-image:
-      radial-gradient(1200px 450px at 10% -10%, hsl(var(--primary) / 0.1), transparent 60%),
-      radial-gradient(900px 400px at 100% 0%, hsl(var(--accent) / 0.08), transparent 58%);
+      radial-gradient(1200px 450px at 10% -10%, hsl(var(--primary) / 0.08), transparent 60%),
+      radial-gradient(900px 400px at 100% 0%, hsl(var(--accent) / 0.06), transparent 58%);
     transition:
-      background-color var(--motion-base) var(--motion-ease),
+      background-color var(--motion-slow) var(--motion-ease),
       color var(--motion-base) var(--motion-ease),
-      border-color var(--motion-base) var(--motion-ease),
+      border-color var(--motion-slow) var(--motion-ease),
       box-shadow var(--motion-base) var(--motion-ease),
-      background-image var(--motion-slow) var(--motion-ease);
+      background-image 800ms var(--motion-ease);
   }
 
   .app-shell * {

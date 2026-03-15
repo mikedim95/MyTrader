@@ -46,12 +46,16 @@ export function MinerStatusBadge({ online, minerState }: MinerStatusBadgeProps) 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium uppercase tracking-wider",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-mono font-medium uppercase tracking-wider transition-all duration-300",
         tone.bg,
         tone.text
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", tone.dot, online && "animate-pulse")} />
+      <span className={cn(
+        "h-1.5 w-1.5 rounded-full transition-shadow duration-500",
+        tone.dot,
+        online && "animate-pulse shadow-[0_0_6px_currentColor]"
+      )} />
       {tone.label}
     </span>
   );

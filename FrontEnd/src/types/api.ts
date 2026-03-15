@@ -387,11 +387,21 @@ export interface DemoAccountHolding {
   targetAllocation: number;
 }
 
+export interface DemoAccountAllocationInput {
+  symbol: string;
+  percent: number;
+}
+
 export interface DemoAccountSettings {
   balance: number;
   updatedAt: string;
   seededAt?: string;
   holdings: DemoAccountHolding[];
+}
+
+export interface DemoAccountInitializeRequest {
+  balance: number;
+  allocations: DemoAccountAllocationInput[];
 }
 
 export type AllocationMap = Record<string, number>;

@@ -27,13 +27,13 @@ const navItems = [
   { id: "automation", label: "Automation", icon: Bot },
   { id: "asic-miners", label: "ASIC Miners", icon: HardDrive },
   { id: "nicehash", label: "NiceHash", icon: Cpu },
+  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 const comingSoon = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "markets", label: "Markets", icon: BarChart3 },
   { id: "orders", label: "Orders", icon: ClipboardList },
-  { id: "settings", label: "Settings", icon: Settings },
 ];
 
 export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -46,13 +46,13 @@ export function AppSidebar({ currentPage, onNavigate }: SidebarProps) {
         collapsed ? "w-16" : "w-60"
       )}
     >
-      <div className="h-16 flex items-center px-4 border-b border-border">
+      <div className="h-14 flex items-center px-4 border-b border-border">
         {!collapsed && (
           <span className="font-mono text-sm font-semibold tracking-widest text-foreground">
-            NEXUS<span className="text-primary">.</span>
+            NEXUS<span className="text-primary transition-colors duration-500">.</span>
           </span>
         )}
-        {collapsed && <span className="font-mono text-sm font-bold text-primary mx-auto">N</span>}
+        {collapsed && <span className="font-mono text-sm font-bold text-primary mx-auto transition-colors duration-500">N</span>}
       </div>
 
       <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">

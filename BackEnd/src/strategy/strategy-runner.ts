@@ -3,7 +3,7 @@ import { StrategyRepository } from "./strategy-repository.js";
 import { buildMarketSignalsFromPortfolio } from "./market-signal-service.js";
 import { buildLiveStrategyMarketContext } from "./strategy-market-context.js";
 import { detectMarketRegime } from "./strategy-regime.js";
-import { createDemoAccountHoldings, getPortfolioState } from "./portfolio-state-service.js";
+import { getPortfolioState } from "./portfolio-state-service.js";
 import { strategyUserScopeKey, StrategyUserScope } from "./strategy-user-scope.js";
 import {
   DemoAccountSettings,
@@ -34,14 +34,7 @@ export class StrategyRunner {
     userScope?: StrategyUserScope
   ): Promise<DemoAccountSettings | undefined> {
     if (accountType !== "demo") return undefined;
-    let demoSettings = await this.repository.getDemoAccountSettings(userScope);
-    if (demoSettings.holdings.length > 0) {
-      return demoSettings;
-    }
-
-    const holdings = await createDemoAccountHoldings("USDC", demoSettings.balance);
-    demoSettings = await this.repository.setDemoAccountHoldings(holdings, userScope);
-    return demoSettings;
+    return this.repository.getDemoAccountSettings(userScope);
   }
 
   private async buildStrategyUniverse(userScope?: StrategyUserScope): Promise<Record<string, StrategyConfig>> {

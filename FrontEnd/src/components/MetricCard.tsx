@@ -12,7 +12,7 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, change, subtitle, children, className }: MetricCardProps) {
   return (
-    <div className={cn("bg-card border border-border rounded-lg p-5", className)}>
+    <div className={cn("bg-card border border-border rounded-lg p-5 transition-all duration-300 hover:border-primary/20 hover:shadow-[0_0_24px_hsl(var(--primary)/0.06)] hover:-translate-y-0.5", className)}>
       <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-3">{title}</div>
       <div className="flex items-end justify-between">
         <div>

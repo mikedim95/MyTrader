@@ -165,6 +165,11 @@ export interface DemoAccountSettings {
   holdings: DemoAccountHolding[];
 }
 
+export interface DemoAccountAllocationInput {
+  symbol: string;
+  percent: number;
+}
+
 export interface StrategyMarketContextSnapshot {
   timestamp: string;
   marketRegime: MarketRegime;

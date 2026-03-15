@@ -51,11 +51,15 @@ export function FleetOverviewCards({ overview }: FleetOverviewCardsProps) {
 
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
-      {cards.map((card) => (
-        <div key={card.label} className="rounded-lg border border-border bg-card p-4">
+      {cards.map((card, idx) => (
+        <div
+          key={card.label}
+          className="group rounded-lg border border-border bg-card p-4 transition-all duration-300 hover:border-primary/30 hover:shadow-[0_0_20px_hsl(var(--primary)/0.08)] hover:-translate-y-0.5"
+          style={{ animationDelay: `${idx * 80}ms` }}
+        >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">{card.label}</span>
-            <card.icon className={`h-3.5 w-3.5 ${card.tone}`} />
+            <card.icon className={`h-3.5 w-3.5 ${card.tone} transition-transform duration-300 group-hover:scale-110`} />
           </div>
           <div className={`text-xl font-mono font-semibold ${card.tone}`}>{card.value}</div>
           <div className="mt-1 text-[11px] font-mono text-muted-foreground">{card.sub}</div>

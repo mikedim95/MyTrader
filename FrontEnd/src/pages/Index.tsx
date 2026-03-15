@@ -8,6 +8,7 @@ import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { NicehashPage } from "@/pages/NicehashPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import type { AppSession, PortfolioAccountType } from "@/types/api";
 
 const inactivePageMeta: Record<string, { title: string; description: string }> = {
@@ -22,10 +23,6 @@ const inactivePageMeta: Record<string, { title: string; description: string }> =
   orders: {
     title: "Orders",
     description: "Detailed order history and management are coming soon.",
-  },
-  settings: {
-    title: "Settings",
-    description: "Extended settings and account controls are coming soon.",
   },
 };
 
@@ -52,6 +49,8 @@ const Index = ({ session, onLogout }: IndexProps) => {
         return <AsicMinersPage />;
       case "nicehash":
         return <NicehashPage />;
+      case "settings":
+        return <SettingsPage />;
       default: {
         const inactive = inactivePageMeta[currentPage];
         return (

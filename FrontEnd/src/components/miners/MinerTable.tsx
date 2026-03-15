@@ -57,7 +57,7 @@ export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: M
             const activePool = live?.pools.find((pool, index) => live.poolActiveIndex === index) ?? live?.pools[0];
 
             return (
-              <TableRow key={miner.id} className="cursor-pointer" onClick={() => onOpen(miner.id)}>
+              <TableRow key={miner.id} className="cursor-pointer transition-colors duration-200 hover:bg-secondary/40" onClick={() => onOpen(miner.id)}>
                 <TableCell>
                   <div className="font-mono text-sm font-semibold text-foreground">{miner.name}</div>
                   <div className="mt-1 text-[11px] font-mono text-muted-foreground">

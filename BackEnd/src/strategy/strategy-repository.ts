@@ -1123,6 +1123,31 @@ export class StrategyRepository {
     });
   }
 
+  async initializeDemoAccount(
+    balance: number,
+    holdings: DemoAccountHolding[],
+    scope?: StrategyUserScope
+  ): Promise<DemoAccountSettings> {
+    return this.mutate(scope, (store) => {
+      const safeBalance =
+        Number.isFinite(balance) && balance > 0 ? balance : createDefaultDemoAccountSettings().balance;
+      const normalizedHoldings = holdings
+        .map((holding) => normalizeDemoAccountHolding(holding))
+        .filter((holding): holding is DemoAccountHolding => holding !== null);
+      const timestamp = new Date().toISOString();
+      store.demoAccount = {
+        balance: safeBalance,
+        updatedAt: timestamp,
+        seededAt: timestamp,
+        holdings: normalizedHoldings,
+      };
+      return {
+        ...store.demoAccount,
+        holdings: normalizedHoldings.map((holding) => ({ ...holding })),
+      };
+    });
+  }
+
   async setDemoAccountHoldings(holdings: DemoAccountHolding[], scope?: StrategyUserScope): Promise<DemoAccountSettings> {
     return this.mutate(scope, (store) => {
       const normalizedHoldings = holdings
@@ -1137,6 +1162,21 @@ export class StrategyRepository {
       return {
         ...store.demoAccount,
         holdings: normalizedHoldings.map((holding) => ({ ...holding })),
+      };
+    });
+  }
+
+  async resetDemoAccount(scope?: StrategyUserScope): Promise<DemoAccountSettings> {
+    return this.mutate(scope, (store) => {
+      const defaultSettings = createDefaultDemoAccountSettings();
+      const timestamp = new Date().toISOString();
+      store.demoAccount = {
+        ...defaultSettings,
+        updatedAt: timestamp,
+      };
+      return {
+        ...store.demoAccount,
+        holdings: [],
       };
     });
   }
