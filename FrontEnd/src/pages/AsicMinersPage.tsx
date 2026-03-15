@@ -10,7 +10,7 @@ import { MinerDetailPanel } from "@/components/miners/MinerDetailPanel";
 import { AddMinerDialog } from "@/components/miners/AddMinerDialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import type { MinerVerificationResult } from "@/types/api";
+import type { FleetHistoryScope, MinerVerificationResult } from "@/types/api";
 
 type MinerAction = "restart" | "reboot" | "start" | "stop" | "pause" | "resume";
 
@@ -18,9 +18,10 @@ export function AsicMinersPage() {
   const queryClient = useQueryClient();
   const [selectedMinerId, setSelectedMinerId] = useState<number | undefined>();
   const [draftVerification, setDraftVerification] = useState<MinerVerificationResult | null>(null);
+  const [historyScope, setHistoryScope] = useState<FleetHistoryScope>("hour");
 
   const { data: overviewData, isPending: loadingOverview } = useFleetOverview();
-  const { data: historyData, isPending: loadingHistory } = useFleetHistory(120);
+  const { data: historyData, isPending: loadingHistory } = useFleetHistory(historyScope);
   const { data: fleetData, isPending: loadingFleet, error: fleetError } = useFleetLive();
   const { data: minersData, isPending: loadingMiners } = useMiners();
   const { data: selectedMinerDetails } = useMinerDetails(selectedMinerId);
@@ -29,7 +30,7 @@ export function AsicMinersPage() {
   const invalidateMinerQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["fleet-overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["fleet-history", 120] }),
+      queryClient.invalidateQueries({ queryKey: ["fleet-history", historyScope] }),
       queryClient.invalidateQueries({ queryKey: ["fleet-live"] }),
       queryClient.invalidateQueries({ queryKey: ["miners-list"] }),
       queryClient.invalidateQueries({ queryKey: ["miner-details", selectedMinerId] }),
@@ -160,7 +161,12 @@ export function AsicMinersPage() {
         </div>
       ) : null}
 
-      <FleetHistoryCharts history={historyData?.history ?? []} isLoading={loadingHistory} />
+      <FleetHistoryCharts
+        history={historyData?.history ?? []}
+        scope={historyScope}
+        onScopeChange={setHistoryScope}
+        isLoading={loadingHistory}
+      />
 
       <div className="rounded-lg border border-border bg-card p-4">
         <div className="mb-4 flex items-center justify-between">

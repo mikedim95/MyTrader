@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { backendApi } from "@/lib/api";
-import type { PortfolioAccountType } from "@/types/api";
+import type { FleetHistoryScope, PortfolioAccountType } from "@/types/api";
 
 export function useDashboardData(accountType: PortfolioAccountType = "real") {
   return useQuery({
@@ -92,10 +92,10 @@ export function useFleetLive() {
   });
 }
 
-export function useFleetHistory(limit = 120) {
+export function useFleetHistory(scope: FleetHistoryScope = "hour") {
   return useQuery({
-    queryKey: ["fleet-history", limit],
-    queryFn: () => backendApi.getFleetHistory(limit),
+    queryKey: ["fleet-history", scope],
+    queryFn: () => backendApi.getFleetHistory(scope),
     staleTime: 10_000,
     refetchInterval: 30_000,
     retry: 1,

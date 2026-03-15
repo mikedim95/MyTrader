@@ -322,6 +322,21 @@ export class MinerRepository {
     return rows.map(mapSnapshotRecord);
   }
 
+  async listHistorySince(minerId: number, sinceIso: string): Promise<MinerSnapshotEntity[]> {
+    await this.init();
+    const [rows] = await pool.query<MinerSnapshotRecord[]>(
+      `
+        SELECT *
+        FROM miner_status_snapshots
+        WHERE miner_id = ?
+          AND created_at >= ?
+        ORDER BY created_at ASC, id ASC
+      `,
+      [minerId, toMysqlDateTime(sinceIso)]
+    );
+    return rows.map(mapSnapshotRecord);
+  }
+
   async replacePools(minerId: number, pools: MinerPoolPersistInput[]): Promise<MinerPoolEntity[]> {
     return this.withConnection(async (conn) => {
       await conn.query(`DELETE FROM miner_pools WHERE miner_id = ?`, [minerId]);

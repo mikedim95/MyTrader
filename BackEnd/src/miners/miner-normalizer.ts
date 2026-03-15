@@ -15,6 +15,22 @@ function arrayOfNumbers(input: Array<number | null | undefined>): number[] {
   return input.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 }
 
+function normalizeHashrateToThs(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value) || value <= 0) return null;
+  if (value <= 400) return value;
+  if (value <= 400_000) return value / 1000;
+  if (value <= 400_000_000) return value / 1_000_000;
+  if (value <= 400_000_000_000) return value / 1_000_000_000;
+  return null;
+}
+
+function cleanTemperature(value: unknown): number | null {
+  const parsed = cleanNumber(value);
+  if (parsed === null || !Number.isFinite(parsed)) return null;
+  if (parsed <= 0 || parsed > 150) return null;
+  return Math.round(parsed);
+}
+
 function stringOrFallback(value: unknown, fallback = "unknown"): string {
   return cleanString(value) ?? fallback;
 }
@@ -95,6 +111,11 @@ function firstInteger(record: Record<string, unknown> | null | undefined, ...key
   return cleanInteger(readField(record, ...keys));
 }
 
+function firstTemperature(record: Record<string, unknown> | null | undefined, ...keys: string[]): number | null {
+  if (!record) return null;
+  return cleanTemperature(readField(record, ...keys));
+}
+
 function firstString(record: Record<string, unknown> | null | undefined, ...keys: string[]): string | null {
   if (!record) return null;
   return cleanString(readField(record, ...keys));
@@ -147,6 +168,12 @@ function collectNumbers(records: Record<string, unknown>[], keys: string[]): num
 function collectIntegers(records: Record<string, unknown>[], keys: string[]): number[] {
   return records
     .map((record) => cleanInteger(readField(record, ...keys)))
+    .filter((value): value is number => value !== null);
+}
+
+function collectTemperatures(records: Record<string, unknown>[], keys: string[]): number[] {
+  return records
+    .map((record) => cleanTemperature(readField(record, ...keys)))
     .filter((value): value is number => value !== null);
 }
 
@@ -354,17 +381,17 @@ export function normalizeMinerLiveData(params: {
   const thermalRecords = [...summaryChains, ...chipsChains, ...devRecords];
 
   const totalRateThs =
-    cleanNumber(cgminerStats ? readField(cgminerStats, "total_rate", "Total Rate") : undefined) ??
+    normalizeHashrateToThs(cleanNumber(cgminerStats ? readField(cgminerStats, "total_rate", "Total Rate") : undefined)) ??
     (cgminerSummary ? readHashrateAsThs(cgminerSummary) : null) ??
-    cleanNumber(cgminerSummary ? readField(cgminerSummary, "SUMMARY", "total_rate") : undefined) ??
-    firstNumber(summaryMiner, "hashrate_ths", "total_hashrate_ths") ??
+    normalizeHashrateToThs(cleanNumber(cgminerSummary ? readField(cgminerSummary, "SUMMARY", "total_rate") : undefined)) ??
+    normalizeHashrateToThs(firstNumber(summaryMiner, "hashrate_ths", "total_hashrate_ths")) ??
     (summaryMiner ? readHashrateAsThs(summaryMiner) : null);
 
   const boardTemps = arrayOfNumbers([
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp2_1") : undefined),
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp2_2") : undefined),
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp2_3") : undefined),
-    ...collectIntegers(thermalRecords, [
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_1") : undefined),
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_2") : undefined),
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp2_3") : undefined),
+    ...collectTemperatures(thermalRecords, [
       "board_temp",
       "boardTemp",
       "temp_board",
@@ -378,10 +405,10 @@ export function normalizeMinerLiveData(params: {
   ]);
 
   const hotspotTemps = arrayOfNumbers([
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp3_1") : undefined),
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp3_2") : undefined),
-    cleanInteger(cgminerStats ? readField(cgminerStats, "temp3_3") : undefined),
-    ...collectIntegers(thermalRecords, [
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_1") : undefined),
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_2") : undefined),
+    cleanTemperature(cgminerStats ? readField(cgminerStats, "temp3_3") : undefined),
+    ...collectTemperatures(thermalRecords, [
       "hotspot_temp",
       "hotspotTemp",
       "chip_temp_max",
@@ -394,23 +421,23 @@ export function normalizeMinerLiveData(params: {
 
   const chipTempStrings = [
     ...[1, 2, 3]
-      .map((index) => cleanNumber(cgminerStats ? readField(cgminerStats, `temp_chip${index}`) : undefined))
+      .map((index) => cleanTemperature(cgminerStats ? readField(cgminerStats, `temp_chip${index}`) : undefined))
       .filter((value): value is number => value !== null)
       .map((value, index) => `Chip ${index + 1}: ${value}C`),
-    ...collectNumbers(thermalRecords, ["chip_temp_avg", "chipTempAvg", "Chip Temp Avg"]).map(
+    ...collectTemperatures(thermalRecords, ["chip_temp_avg", "chipTempAvg", "Chip Temp Avg"]).map(
       (value, index) => `Chip ${index + 1} avg: ${value}C`
     ),
-    ...collectNumbers(thermalRecords, ["chip_temp_max", "chipTempMax", "Chip Temp Max"]).map(
+    ...collectTemperatures(thermalRecords, ["chip_temp_max", "chipTempMax", "Chip Temp Max"]).map(
       (value, index) => `Chip ${index + 1} max: ${value}C`
     ),
   ];
 
   const pcbTempStrings = [
     ...[1, 2, 3]
-      .map((index) => cleanNumber(cgminerStats ? readField(cgminerStats, `temp_pcb${index}`) : undefined))
+      .map((index) => cleanTemperature(cgminerStats ? readField(cgminerStats, `temp_pcb${index}`) : undefined))
       .filter((value): value is number => value !== null)
       .map((value, index) => `PCB ${index + 1}: ${value}C`),
-    ...collectNumbers(thermalRecords, ["pcb_temp", "pcbTemp", "board_temp", "boardTemp"]).map(
+    ...collectTemperatures(thermalRecords, ["pcb_temp", "pcbTemp", "board_temp", "boardTemp"]).map(
       (value, index) => `PCB ${index + 1}: ${value}C`
     ),
   ];

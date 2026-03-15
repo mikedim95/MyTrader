@@ -174,6 +174,8 @@ export interface FleetHistorySeries {
   points: FleetHistoryPoint[];
 }
 
+export type FleetHistoryScope = "hour" | "day" | "week" | "month";
+
 export interface MinerVerificationResult {
   reachable: boolean;
   httpOk: boolean;
@@ -259,6 +261,7 @@ export interface FleetLiveResponse {
 export interface FleetHistoryResponse {
   history: FleetHistorySeries[];
   generatedAt: string;
+  scope: FleetHistoryScope;
 }
 
 export interface FleetOverviewResponse {

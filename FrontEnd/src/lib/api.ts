@@ -10,6 +10,7 @@ import type {
   CreateMinerResponse,
   DashboardResponse,
   FleetHistoryResponse,
+  FleetHistoryScope,
   ExecutionPlanResponse,
   FleetLiveResponse,
   FleetOverviewResponse,
@@ -195,7 +196,7 @@ export const backendApi = {
     apiRequest<MinerHistoryResponse>(withQuery(`/api/miners/${minerId}/history`, { limit: String(limit) })),
   getMinerPools: (minerId: number) => apiRequest<MinerPoolsResponse>(`/api/miners/${minerId}/pools`),
   getFleetLive: () => apiRequest<FleetLiveResponse>("/api/fleet/live"),
-  getFleetHistory: (limit = 120) => apiRequest<FleetHistoryResponse>(withQuery("/api/fleet/history", { limit: String(limit) })),
+  getFleetHistory: (scope: FleetHistoryScope = "hour") => apiRequest<FleetHistoryResponse>(withQuery("/api/fleet/history", { scope })),
   getFleetOverview: () => apiRequest<FleetOverviewResponse>("/api/fleet/overview"),
   restartMiner: (minerId: number) =>
     apiRequest<MinerCommandResponse>(`/api/miners/${minerId}/restart`, {

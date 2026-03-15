@@ -42,7 +42,22 @@ const historyQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(500).default(120),
 });
 
+const fleetHistoryQuerySchema = z.object({
+  scope: z.enum(["hour", "day", "week", "month"]).default("hour"),
+});
+
 const verifyDraftSchema = addMinerSchema;
+
+const FLEET_HISTORY_SCOPE_CONFIG = {
+  hour: { rangeMs: 60 * 60 * 1000, bucketMs: 60 * 1000 },
+  day: { rangeMs: 24 * 60 * 60 * 1000, bucketMs: 15 * 60 * 1000 },
+  week: { rangeMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 60 * 60 * 1000 },
+  month: { rangeMs: 30 * 24 * 60 * 60 * 1000, bucketMs: 6 * 60 * 60 * 1000 },
+} as const;
+
+function isValidTemperature(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 150;
+}
 
 function asyncHandler(
   handler: (req: Request, res: Response, next: NextFunction) => Promise<void>
@@ -77,6 +92,12 @@ interface MinerApiDeps {
   commandService: MinerCommandService;
   cryptoService: MinerCryptoService;
   pollingService: MinerPollingService;
+}
+
+function bucketTimestamp(timestamp: string, bucketMs: number): string {
+  const time = new Date(timestamp).getTime();
+  const bucketStart = Math.floor(time / bucketMs) * bucketMs;
+  return new Date(bucketStart).toISOString();
 }
 
 export function createMinerRouter(deps: MinerApiDeps): Router {
@@ -464,8 +485,8 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
           online: snapshot.online,
           totalRateThs: snapshot.totalRateThs,
           powerWatts: snapshot.powerWatts,
-          boardTemps: snapshot.boardTemps.filter((value): value is number => typeof value === "number"),
-          hotspotTemps: snapshot.hotspotTemps.filter((value): value is number => typeof value === "number"),
+          boardTemps: snapshot.boardTemps.filter(isValidTemperature),
+          hotspotTemps: snapshot.hotspotTemps.filter(isValidTemperature),
           fanPwm: snapshot.fanPwm,
         })),
       });
@@ -504,31 +525,82 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
   router.get(
     "/fleet/history",
     asyncHandler(async (req, res) => {
-      const query = parseOrRespond(historyQuerySchema, req.query, res);
+      const query = parseOrRespond(fleetHistoryQuerySchema, req.query, res);
       if (!query) return;
 
+      const scope = query.scope ?? "hour";
+      const scopeConfig = FLEET_HISTORY_SCOPE_CONFIG[scope];
+      const now = Date.now();
+      const sinceIso = new Date(now - scopeConfig.rangeMs).toISOString();
       const miners = await deps.repository.listMiners();
       const history = await Promise.all(
         miners.map(async (miner) => {
-          const snapshots = await deps.repository.listHistory(miner.id, query.limit);
-          const points = [...snapshots]
-            .reverse()
-            .map((snapshot) => {
-              const boardTemps = snapshot.boardTemps.filter((value): value is number => typeof value === "number");
-              const hotspotTemps = snapshot.hotspotTemps.filter((value): value is number => typeof value === "number");
-              const maxBoardTemp = boardTemps.length > 0 ? Math.max(...boardTemps) : null;
-              const maxHotspotTemp = hotspotTemps.length > 0 ? Math.max(...hotspotTemps) : null;
+          const snapshots = await deps.repository.listHistorySince(miner.id, sinceIso);
+          const buckets = new Map<
+            string,
+            {
+              timestamp: string;
+              onlineCount: number;
+              count: number;
+              totalRateSum: number;
+              totalRateCount: number;
+              powerSum: number;
+              powerCount: number;
+              maxBoardTemp: number | null;
+              maxHotspotTemp: number | null;
+            }
+          >();
 
-              return {
-                timestamp: snapshot.createdAt,
-                online: snapshot.online,
-                totalRateThs: snapshot.totalRateThs,
-                maxBoardTemp,
-                maxHotspotTemp,
-                maxTemp: maxHotspotTemp ?? maxBoardTemp,
-                powerWatts: snapshot.powerWatts,
-              };
-            });
+          for (const snapshot of snapshots) {
+            const key = bucketTimestamp(snapshot.createdAt, scopeConfig.bucketMs);
+            const boardTemps = snapshot.boardTemps.filter(isValidTemperature);
+            const hotspotTemps = snapshot.hotspotTemps.filter(isValidTemperature);
+            const currentBoardMax = boardTemps.length > 0 ? Math.max(...boardTemps) : null;
+            const currentHotspotMax = hotspotTemps.length > 0 ? Math.max(...hotspotTemps) : null;
+
+            const bucket = buckets.get(key) ?? {
+              timestamp: key,
+              onlineCount: 0,
+              count: 0,
+              totalRateSum: 0,
+              totalRateCount: 0,
+              powerSum: 0,
+              powerCount: 0,
+              maxBoardTemp: null,
+              maxHotspotTemp: null,
+            };
+
+            bucket.count += 1;
+            if (snapshot.online) bucket.onlineCount += 1;
+            if (typeof snapshot.totalRateThs === "number") {
+              bucket.totalRateSum += snapshot.totalRateThs;
+              bucket.totalRateCount += 1;
+            }
+            if (typeof snapshot.powerWatts === "number" && snapshot.powerWatts > 0) {
+              bucket.powerSum += snapshot.powerWatts;
+              bucket.powerCount += 1;
+            }
+            if (typeof currentBoardMax === "number") {
+              bucket.maxBoardTemp = bucket.maxBoardTemp === null ? currentBoardMax : Math.max(bucket.maxBoardTemp, currentBoardMax);
+            }
+            if (typeof currentHotspotMax === "number") {
+              bucket.maxHotspotTemp = bucket.maxHotspotTemp === null ? currentHotspotMax : Math.max(bucket.maxHotspotTemp, currentHotspotMax);
+            }
+
+            buckets.set(key, bucket);
+          }
+
+          const points = Array.from(buckets.values())
+            .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime())
+            .map((bucket) => ({
+              timestamp: bucket.timestamp,
+              online: bucket.onlineCount > 0,
+              totalRateThs: bucket.totalRateCount > 0 ? Number((bucket.totalRateSum / bucket.totalRateCount).toFixed(2)) : null,
+              maxBoardTemp: bucket.maxBoardTemp,
+              maxHotspotTemp: bucket.maxHotspotTemp,
+              maxTemp: bucket.maxHotspotTemp ?? bucket.maxBoardTemp,
+              powerWatts: bucket.powerCount > 0 ? Math.round(bucket.powerSum / bucket.powerCount) : null,
+            }));
 
           return {
             minerId: miner.id,
@@ -542,6 +614,7 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
       res.json({
         history: history.filter((series) => series.points.length > 0),
         generatedAt: new Date().toISOString(),
+        scope,
       });
     })
   );
@@ -564,10 +637,12 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
       const totalRateThs = fleet.reduce((sum, miner) => sum + (miner.totalRateThs ?? 0), 0);
       const totalPowerWatts = fleet.reduce((sum, miner) => sum + (miner.powerWatts ?? 0), 0);
       const hottestBoardTemp = fleet.flatMap((miner) => miner.boardTemps).reduce<number | null>((max, value) => {
+        if (!isValidTemperature(value)) return max;
         if (max === null) return value;
         return Math.max(max, value);
       }, null);
       const hottestHotspotTemp = fleet.flatMap((miner) => miner.hotspotTemps).reduce<number | null>((max, value) => {
+        if (!isValidTemperature(value)) return max;
         if (max === null) return value;
         return Math.max(max, value);
       }, null);
