@@ -142,13 +142,14 @@ async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<Dash
     sparklinePeriod: "24h" as const,
   }));
 
-  const previousTotalValue = round(
-    assets.reduce((sum, asset) => sum + (asset.sparkline[0] ?? asset.value), 0),
-    2
-  );
   const totalPortfolioValue = round(assets.reduce((sum, asset) => sum + asset.value, 0), 2);
-  const portfolioChange24hValue = round(totalPortfolioValue - previousTotalValue, 2);
-  const portfolioChange24h = previousTotalValue <= 0 ? 0 : round((portfolioChange24hValue / previousTotalValue) * 100, 2);
+  const demoBaselineValue =
+    demoInitialized && Number.isFinite(demoAccount.balance) && demoAccount.balance > 0
+      ? round(demoAccount.balance, 2)
+      : totalPortfolioValue;
+  const portfolioChange24hValue = demoInitialized ? round(totalPortfolioValue - demoBaselineValue, 2) : 0;
+  const portfolioChange24h =
+    !demoInitialized || demoBaselineValue <= 0 ? 0 : round((portfolioChange24hValue / demoBaselineValue) * 100, 2);
 
   const labels = assetSeries[0]?.dailySeries.labels ?? generateRecentDayLabels(30);
   const portfolioHistory = labels.map((label, index) => {

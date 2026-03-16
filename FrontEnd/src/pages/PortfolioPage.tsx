@@ -15,6 +15,7 @@ export function PortfolioPage({ accountType, onSelectAsset }: PortfolioPageProps
   const { data, isPending, error } = useDashboardData(accountType);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const isLoading = isPending && !data;
+  const changeMetricLabel = accountType === "demo" ? "Net P&L" : "24h Change";
 
   const assets = data?.assets ?? [];
 
@@ -54,7 +55,7 @@ export function PortfolioPage({ accountType, onSelectAsset }: PortfolioPageProps
           </div>
 
           <div className="rounded-lg border border-border bg-card p-4">
-            <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">24h Change</div>
+            <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">{changeMetricLabel}</div>
             <SpinnerValue
               loading={isLoading}
               value={

@@ -1156,7 +1156,7 @@ export class StrategyRepository {
       const timestamp = new Date().toISOString();
       store.demoAccount = {
         ...store.demoAccount,
-        seededAt: timestamp,
+        updatedAt: timestamp,
         holdings: normalizedHoldings,
       };
       return {

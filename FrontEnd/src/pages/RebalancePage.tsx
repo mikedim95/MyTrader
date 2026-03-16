@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pie, PieChart, Cell, ResponsiveContainer } from "recharts";
 import { backendApi } from "@/lib/api";
@@ -49,6 +49,78 @@ const BASIC_STRATEGY_IDS = new Set<string>([
 interface RebalancePageProps {
   accountType: PortfolioAccountType;
 }
+
+interface AllocationRow {
+  symbol: string;
+  current: number;
+  target: number;
+  diff: number;
+}
+
+interface AllocationChartSlice {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface AllocationPieCardProps {
+  title: string;
+  data: AllocationChartSlice[];
+  dataSignature: string;
+  animationDelayMs?: number;
+}
+
+function buildAllocationSignature(rows: AllocationRow[]): string {
+  return rows.map((row) => `${row.symbol}:${row.current.toFixed(4)}:${row.target.toFixed(4)}`).join("|");
+}
+
+function buildChartSignature(data: AllocationChartSlice[]): string {
+  return data.map((entry) => `${entry.name}:${entry.value.toFixed(4)}`).join("|");
+}
+
+function renderAllocationLabel({ name, value }: { name?: string; value?: number }): string {
+  if (!name || typeof value !== "number" || !Number.isFinite(value)) {
+    return "";
+  }
+
+  return `${name} ${value.toFixed(1)}%`;
+}
+
+const AllocationPieCard = memo(
+  function AllocationPieCard({ title, data, dataSignature, animationDelayMs = 0 }: AllocationPieCardProps) {
+    return (
+      <div
+        className="rounded-lg border border-border bg-card p-5 animate-fade-scale-in [&_.recharts-layer]:transition-none [&_.recharts-sector]:transition-none [&_.recharts-text]:transition-none"
+        style={{ animationDelay: `${animationDelayMs}ms` }}
+      >
+        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">{title}</div>
+        <ResponsiveContainer width="100%" height={280}>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={60}
+              outerRadius={108}
+              dataKey="value"
+              stroke="none"
+              isAnimationActive={false}
+              label={renderAllocationLabel}
+            >
+              {data.map((entry) => (
+                <Cell key={entry.name} fill={entry.color} />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  },
+  (previousProps, nextProps) =>
+    previousProps.title === nextProps.title &&
+    previousProps.dataSignature === nextProps.dataSignature &&
+    previousProps.animationDelayMs === nextProps.animationDelayMs
+);
 
 export function RebalancePage({ accountType }: RebalancePageProps) {
   const queryClient = useQueryClient();
@@ -112,7 +184,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const currentAllocation = executionPlan?.currentAllocation ?? state?.currentAllocation ?? {};
   const targetAllocation = executionPlan?.adjustedTargetAllocation ?? state?.adjustedTargetAllocation ?? {};
 
-  const allocationRows = useMemo(() => {
+  const allocationRows = useMemo<AllocationRow[]>(() => {
     const symbols = Array.from(new Set([...Object.keys(currentAllocation), ...Object.keys(targetAllocation)])).sort((a, b) =>
       a.localeCompare(b)
     );
@@ -131,8 +203,37 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     });
   }, [currentAllocation, targetAllocation]);
 
-  const currentChart = allocationRows.map((row) => ({ name: row.symbol, value: row.current })).filter((row) => row.value > 0);
-  const targetChart = allocationRows.map((row) => ({ name: row.symbol, value: row.target })).filter((row) => row.value > 0);
+  const allocationSignature = useMemo(() => buildAllocationSignature(allocationRows), [allocationRows]);
+
+  const allocationColors = useMemo(() => {
+    return allocationRows.reduce<Record<string, string>>((colorMap, row, index) => {
+      colorMap[row.symbol] = CHART_COLORS[index % CHART_COLORS.length];
+      return colorMap;
+    }, {});
+  }, [allocationSignature]);
+
+  const currentChart = useMemo<AllocationChartSlice[]>(() => {
+    return allocationRows
+      .filter((row) => row.current > 0)
+      .map((row) => ({
+        name: row.symbol,
+        value: row.current,
+        color: allocationColors[row.symbol],
+      }));
+  }, [allocationSignature]);
+
+  const targetChart = useMemo<AllocationChartSlice[]>(() => {
+    return allocationRows
+      .filter((row) => row.target > 0)
+      .map((row) => ({
+        name: row.symbol,
+        value: row.target,
+        color: allocationColors[row.symbol],
+      }));
+  }, [allocationSignature]);
+
+  const currentChartSignature = useMemo(() => buildChartSignature(currentChart), [currentChart]);
+  const targetChartSignature = useMemo(() => buildChartSignature(targetChart), [targetChart]);
 
   const warnings = useMemo(() => {
     const combined = [...(executionPlan?.warnings ?? []), ...(state?.warnings ?? [])];
@@ -232,49 +333,13 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">Current Allocation</div>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={currentChart}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={108}
-                dataKey="value"
-                stroke="none"
-                label={({ name, value }) => `${name} ${(value as number).toFixed(1)}%`}
-              >
-                {currentChart.map((entry, index) => (
-                  <Cell key={`${entry.name}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-5">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-4 text-center">Adjusted Target Allocation</div>
-          <ResponsiveContainer width="100%" height={280}>
-            <PieChart>
-              <Pie
-                data={targetChart}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={108}
-                dataKey="value"
-                stroke="none"
-                label={({ name, value }) => `${name} ${(value as number).toFixed(1)}%`}
-              >
-                {targetChart.map((entry, index) => (
-                  <Cell key={`${entry.name}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
+        <AllocationPieCard title="Current Allocation" data={currentChart} dataSignature={currentChartSignature} animationDelayMs={40} />
+        <AllocationPieCard
+          title="Adjusted Target Allocation"
+          data={targetChart}
+          dataSignature={targetChartSignature}
+          animationDelayMs={140}
+        />
       </div>
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">

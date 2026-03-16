@@ -322,7 +322,7 @@ export class StrategyRunner {
           evaluation.adjustedTargetAllocation
         );
 
-        await this.repository.initializeDemoAccount(portfolio.totalValue, nextHoldings, userScope);
+        await this.repository.setDemoAccountHoldings(nextHoldings, userScope);
         executionWarnings.push("Demo rebalance executed at current market prices.");
       }
 
