@@ -42,6 +42,7 @@ export class StrategyScheduler {
 
       for (const scope of scopes) {
         const dueStrategies = await this.repository.listDueStrategies(nowIso, scope);
+        const dueProfiles = await this.repository.listDueRebalanceAllocationProfiles(nowIso, scope);
 
         for (const strategy of dueStrategies) {
           if (this.runner.isRunning(strategy.id, "real", scope)) {
@@ -53,6 +54,23 @@ export class StrategyScheduler {
           } catch (error) {
             console.error(
               `[strategy-scheduler] user=${scope.username ?? scope.userId} strategy=${strategy.id} failed:`,
+              error instanceof Error ? error.message : error
+            );
+          }
+        }
+
+        for (const profile of dueProfiles) {
+          if (this.runner.isRunning(profile.strategyId, "demo", scope, profile.id)) {
+            continue;
+          }
+
+          try {
+            await this.runner.executeRebalanceAllocationProfile(profile.id, "schedule", scope, {
+              respectAutoThreshold: true,
+            });
+          } catch (error) {
+            console.error(
+              `[strategy-scheduler] user=${scope.username ?? scope.userId} rebalance-allocation=${profile.id} failed:`,
               error instanceof Error ? error.message : error
             );
           }

@@ -1702,7 +1702,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     <div className="p-6 space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-lg font-mono font-semibold text-foreground">Automation</h2>
+          <h2 className="text-lg font-mono font-semibold text-foreground">Strategies</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Structured strategy editor, run detail explorer, and backtesting.
           </p>

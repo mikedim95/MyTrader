@@ -26,7 +26,7 @@ const navItems = [
   { id: "portfolio", label: "Portfolio", icon: Briefcase },
   { id: "trading", label: "Trading", icon: ClipboardList },
   { id: "rebalance", label: "Rebalance", icon: RefreshCw },
-  { id: "automation", label: "Automation", icon: Bot },
+  { id: "automation", label: "Strategies", icon: Bot },
   { id: "asic-miners", label: "ASIC Miners", icon: HardDrive },
   { id: "nicehash", label: "NiceHash", icon: Cpu },
 ];

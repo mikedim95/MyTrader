@@ -9,13 +9,14 @@ import {
   DemoAccountHolding,
   DemoAccountSettings,
   ExecutionPlan,
+  RebalanceAllocationProfile,
   StrategyConfig,
   StrategyRun,
   StrategyRunStatus,
   StrategyStoreData,
 } from "./types.js";
 import { buildPresetStrategies } from "./strategy-presets.js";
-import { createNextRunAt } from "./allocation-utils.js";
+import { createNextRunAt, normalizeAllocation } from "./allocation-utils.js";
 import { StrategyUserScope } from "./strategy-user-scope.js";
 
 const DEFAULT_DEMO_ACCOUNT_BALANCE = 10_000;
@@ -177,6 +178,7 @@ function createDefaultDemoAccountSettings(): DemoAccountSettings {
 
 const DEFAULT_STORE: StrategyStoreData = {
   strategies: [],
+  rebalanceAllocationProfiles: [],
   strategyRuns: [],
   executionPlans: [],
   backtestRuns: [],
@@ -272,9 +274,104 @@ function normalizeDemoAccountSettings(entry: unknown): DemoAccountSettings {
   };
 }
 
+function normalizeAllocationMap(entry: unknown, fallbackSymbol = "USDC"): Record<string, number> {
+  if (!entry || typeof entry !== "object") {
+    return { [fallbackSymbol]: 100 };
+  }
+
+  const raw = entry as Record<string, unknown>;
+  const normalized: Record<string, number> = {};
+  Object.entries(raw).forEach(([symbol, value]) => {
+    const normalizedSymbol = symbol.trim().toUpperCase();
+    const safeValue = typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+    if (!normalizedSymbol || safeValue === null) return;
+    normalized[normalizedSymbol] = safeValue;
+  });
+
+  if (Object.keys(normalized).length === 0) {
+    return { [fallbackSymbol]: 100 };
+  }
+
+  return normalizeAllocation(normalized);
+}
+
+function normalizeRebalanceAllocationProfile(entry: unknown): RebalanceAllocationProfile | null {
+  if (!entry || typeof entry !== "object") return null;
+
+  const shape = entry as Partial<RebalanceAllocationProfile>;
+  const id = typeof shape.id === "string" && shape.id.trim().length > 0 ? shape.id : null;
+  const name = typeof shape.name === "string" && shape.name.trim().length > 0 ? shape.name.trim() : null;
+  const strategyId =
+    typeof shape.strategyId === "string" && shape.strategyId.trim().length > 0 ? shape.strategyId.trim() : null;
+  const allocatedCapital =
+    typeof shape.allocatedCapital === "number" && Number.isFinite(shape.allocatedCapital) && shape.allocatedCapital > 0
+      ? shape.allocatedCapital
+      : null;
+  const baseCurrency =
+    typeof shape.baseCurrency === "string" && shape.baseCurrency.trim().length > 0
+      ? shape.baseCurrency.trim().toUpperCase()
+      : "USDC";
+  const allocation = normalizeAllocationMap(shape.allocation, baseCurrency);
+  const holdings = Array.isArray(shape.holdings)
+    ? shape.holdings
+        .map((holding) => normalizeDemoAccountHolding(holding))
+        .filter((holding): holding is DemoAccountHolding => holding !== null)
+    : [];
+  const executionPolicy =
+    shape.executionPolicy === "on_strategy_run" || shape.executionPolicy === "interval"
+      ? shape.executionPolicy
+      : "manual";
+  const autoExecuteMinDriftPct =
+    typeof shape.autoExecuteMinDriftPct === "number" &&
+    Number.isFinite(shape.autoExecuteMinDriftPct) &&
+    shape.autoExecuteMinDriftPct >= 0
+      ? shape.autoExecuteMinDriftPct
+      : undefined;
+  const scheduleInterval =
+    typeof shape.scheduleInterval === "string" && shape.scheduleInterval.trim().length > 0
+      ? shape.scheduleInterval.trim().toLowerCase()
+      : undefined;
+  const createdAt =
+    typeof shape.createdAt === "string" && shape.createdAt.trim().length > 0 ? shape.createdAt : DEFAULT_DEMO_UPDATED_AT;
+  const updatedAt =
+    typeof shape.updatedAt === "string" && shape.updatedAt.trim().length > 0 ? shape.updatedAt : createdAt;
+
+  if (!id || !name || !strategyId || allocatedCapital === null) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    description: typeof shape.description === "string" && shape.description.trim().length > 0 ? shape.description.trim() : undefined,
+    strategyId,
+    allocatedCapital,
+    baseCurrency,
+    allocation,
+    holdings,
+    isEnabled: shape.isEnabled !== false,
+    executionPolicy,
+    autoExecuteMinDriftPct,
+    scheduleInterval,
+    lastEvaluatedAt:
+      typeof shape.lastEvaluatedAt === "string" && shape.lastEvaluatedAt.trim().length > 0 ? shape.lastEvaluatedAt : undefined,
+    lastExecutedAt:
+      typeof shape.lastExecutedAt === "string" && shape.lastExecutedAt.trim().length > 0 ? shape.lastExecutedAt : undefined,
+    nextExecutionAt:
+      typeof shape.nextExecutionAt === "string" && shape.nextExecutionAt.trim().length > 0 ? shape.nextExecutionAt : undefined,
+    createdAt,
+    updatedAt,
+  };
+}
+
 function cloneStore(store: StrategyStoreData): StrategyStoreData {
   return {
     strategies: [...store.strategies],
+    rebalanceAllocationProfiles: store.rebalanceAllocationProfiles.map((profile) => ({
+      ...profile,
+      allocation: { ...profile.allocation },
+      holdings: profile.holdings.map((holding) => ({ ...holding })),
+    })),
     strategyRuns: [...store.strategyRuns],
     executionPlans: [...store.executionPlans],
     backtestRuns: [...store.backtestRuns],
@@ -291,6 +388,11 @@ function parseStore(raw: string): StrategyStoreData {
     const parsed = JSON.parse(raw) as Partial<StrategyStoreData>;
     return {
       strategies: Array.isArray(parsed.strategies) ? parsed.strategies : [],
+      rebalanceAllocationProfiles: Array.isArray((parsed as { rebalanceAllocationProfiles?: unknown[] }).rebalanceAllocationProfiles)
+        ? (parsed as { rebalanceAllocationProfiles: unknown[] }).rebalanceAllocationProfiles
+            .map((item) => normalizeRebalanceAllocationProfile(item))
+            .filter((item): item is RebalanceAllocationProfile => item !== null)
+        : [],
       strategyRuns: Array.isArray(parsed.strategyRuns)
         ? parsed.strategyRuns
             .map((item) => normalizeStrategyRun(item as Partial<StrategyRun>))
@@ -1038,6 +1140,14 @@ export class StrategyRepository {
       store.backtestRuns = store.backtestRuns.filter((run) => run.strategyId !== strategyId);
 
       store.backtestSteps = store.backtestSteps.filter((step) => !removedBacktestRunIds.has(step.backtestRunId));
+      const removedProfileIds = new Set(
+        store.rebalanceAllocationProfiles
+          .filter((profile) => profile.strategyId === strategyId)
+          .map((profile) => profile.id)
+      );
+      store.rebalanceAllocationProfiles = store.rebalanceAllocationProfiles.filter((profile) => profile.strategyId !== strategyId);
+      store.strategyRuns = store.strategyRuns.filter((run) => !removedProfileIds.has(run.rebalanceAllocationId ?? ""));
+      store.executionPlans = store.executionPlans.filter((plan) => !removedProfileIds.has(plan.rebalanceAllocationId ?? ""));
 
       return true;
     });
@@ -1099,6 +1209,146 @@ export class StrategyRepository {
           return leftRun.localeCompare(rightRun);
         })
     );
+  }
+
+  async listRebalanceAllocationProfiles(scope?: StrategyUserScope): Promise<RebalanceAllocationProfile[]> {
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.rebalanceAllocationProfiles).map((profile) => ({
+        ...profile,
+        allocation: { ...profile.allocation },
+        holdings: profile.holdings.map((holding) => ({ ...holding })),
+      }))
+    );
+  }
+
+  async getRebalanceAllocationProfile(profileId: string, scope?: StrategyUserScope): Promise<RebalanceAllocationProfile | null> {
+    return this.readAfterWrites(scope, (store) => {
+      const profile = store.rebalanceAllocationProfiles.find((item) => item.id === profileId);
+      if (!profile) return null;
+      return {
+        ...profile,
+        allocation: { ...profile.allocation },
+        holdings: profile.holdings.map((holding) => ({ ...holding })),
+      };
+    });
+  }
+
+  async saveRebalanceAllocationProfile(
+    profile: RebalanceAllocationProfile,
+    scope?: StrategyUserScope
+  ): Promise<RebalanceAllocationProfile> {
+    return this.mutate(scope, (store) => {
+      const nextProfile = normalizeRebalanceAllocationProfile(profile);
+      if (!nextProfile) {
+        throw new Error("Invalid rebalance allocation profile.");
+      }
+
+      const index = store.rebalanceAllocationProfiles.findIndex((item) => item.id === nextProfile.id);
+      if (index >= 0) {
+        store.rebalanceAllocationProfiles[index] = nextProfile;
+      } else {
+        store.rebalanceAllocationProfiles.push(nextProfile);
+      }
+
+      return {
+        ...nextProfile,
+        allocation: { ...nextProfile.allocation },
+        holdings: nextProfile.holdings.map((holding) => ({ ...holding })),
+      };
+    });
+  }
+
+  async deleteRebalanceAllocationProfile(profileId: string, scope?: StrategyUserScope): Promise<boolean> {
+    return this.mutate(scope, (store) => {
+      const before = store.rebalanceAllocationProfiles.length;
+      store.rebalanceAllocationProfiles = store.rebalanceAllocationProfiles.filter((profile) => profile.id !== profileId);
+      const removed = store.rebalanceAllocationProfiles.length < before;
+      if (!removed) {
+        return false;
+      }
+
+      store.strategyRuns = store.strategyRuns.filter((run) => run.rebalanceAllocationId !== profileId);
+      store.executionPlans = store.executionPlans.filter((plan) => plan.rebalanceAllocationId !== profileId);
+      return true;
+    });
+  }
+
+  async listRebalanceAllocationProfilesByStrategy(
+    strategyId: string,
+    scope?: StrategyUserScope
+  ): Promise<RebalanceAllocationProfile[]> {
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.rebalanceAllocationProfiles)
+        .filter((profile) => profile.strategyId === strategyId)
+        .map((profile) => ({
+          ...profile,
+          allocation: { ...profile.allocation },
+          holdings: profile.holdings.map((holding) => ({ ...holding })),
+        }))
+    );
+  }
+
+  async listDueRebalanceAllocationProfiles(nowIso: string, scope?: StrategyUserScope): Promise<RebalanceAllocationProfile[]> {
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.rebalanceAllocationProfiles)
+        .filter((profile) => {
+          if (!profile.isEnabled) return false;
+          if (profile.executionPolicy !== "interval") return false;
+          if (!profile.nextExecutionAt) return true;
+          return profile.nextExecutionAt <= nowIso;
+        })
+        .map((profile) => ({
+          ...profile,
+          allocation: { ...profile.allocation },
+          holdings: profile.holdings.map((holding) => ({ ...holding })),
+        }))
+    );
+  }
+
+  async markRebalanceAllocationProfileEvaluated(
+    profileId: string,
+    evaluatedAtIso: string,
+    scope?: StrategyUserScope
+  ): Promise<RebalanceAllocationProfile | null> {
+    return this.mutate(scope, (store) => {
+      const profile = store.rebalanceAllocationProfiles.find((item) => item.id === profileId);
+      if (!profile) return null;
+      profile.lastEvaluatedAt = evaluatedAtIso;
+      profile.updatedAt = evaluatedAtIso;
+      return {
+        ...profile,
+        allocation: { ...profile.allocation },
+        holdings: profile.holdings.map((holding) => ({ ...holding })),
+      };
+    });
+  }
+
+  async applyRebalanceAllocationProfileExecution(
+    profileId: string,
+    holdings: DemoAccountHolding[],
+    executedAtIso: string,
+    scope?: StrategyUserScope
+  ): Promise<RebalanceAllocationProfile | null> {
+    return this.mutate(scope, (store) => {
+      const profile = store.rebalanceAllocationProfiles.find((item) => item.id === profileId);
+      if (!profile) return null;
+
+      profile.holdings = holdings
+        .map((holding) => normalizeDemoAccountHolding(holding))
+        .filter((holding): holding is DemoAccountHolding => holding !== null);
+      profile.lastEvaluatedAt = executedAtIso;
+      profile.lastExecutedAt = executedAtIso;
+      profile.updatedAt = executedAtIso;
+      if (profile.executionPolicy === "interval" && profile.scheduleInterval) {
+        profile.nextExecutionAt = createNextRunAt(executedAtIso, profile.scheduleInterval);
+      }
+
+      return {
+        ...profile,
+        allocation: { ...profile.allocation },
+        holdings: profile.holdings.map((holding) => ({ ...holding })),
+      };
+    });
   }
 
   async getDemoAccountSettings(scope?: StrategyUserScope): Promise<DemoAccountSettings> {
@@ -1183,6 +1433,8 @@ export class StrategyRepository {
 
   async createStrategyRun(input: {
     strategyId: string;
+    rebalanceAllocationId?: string;
+    rebalanceAllocationName?: string;
     status: StrategyRunStatus;
     accountType: StrategyRun["accountType"];
     mode: StrategyRun["mode"];
@@ -1197,6 +1449,8 @@ export class StrategyRepository {
       const run: StrategyRun = {
         id: randomUUID(),
         strategyId: input.strategyId,
+        rebalanceAllocationId: input.rebalanceAllocationId,
+        rebalanceAllocationName: input.rebalanceAllocationName,
         startedAt: new Date().toISOString(),
         status: input.status,
         accountType: input.accountType,

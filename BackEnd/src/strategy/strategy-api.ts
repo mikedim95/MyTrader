@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
 import { z } from "zod";
 import { BacktestEngine } from "./backtest-engine.js";
@@ -6,7 +7,7 @@ import { buildBacktestReport } from "./simulation-reporter.js";
 import { mergeStrategyUpdate, validateStrategyDsl } from "./strategy-dsl-parser.js";
 import { StrategyRepository } from "./strategy-repository.js";
 import { StrategyRunner } from "./strategy-runner.js";
-import { parseScheduleIntervalToMs } from "./allocation-utils.js";
+import { createNextRunAt, parseScheduleIntervalToMs } from "./allocation-utils.js";
 import { createDemoAccountHoldings } from "./portfolio-state-service.js";
 import { PortfolioAccountType } from "./types.js";
 import { isBasicStrategyId } from "./strategy-catalog.js";
@@ -46,6 +47,22 @@ const demoAccountInitializeSchema = z.object({
     )
     .min(1),
 });
+const allocationEntrySchema = z.object({
+  symbol: z.string().min(1),
+  percent: z.number().finite().positive(),
+});
+const rebalanceAllocationProfileSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).optional(),
+  strategyId: z.string().trim().min(1),
+  allocatedCapital: z.number().finite().positive(),
+  baseCurrency: z.string().trim().min(1).default("USDC"),
+  allocations: z.array(allocationEntrySchema).min(1),
+  isEnabled: z.boolean().default(true),
+  executionPolicy: z.enum(["manual", "on_strategy_run", "interval"]).default("manual"),
+  autoExecuteMinDriftPct: z.number().finite().min(0).max(100).optional(),
+  scheduleInterval: z.string().regex(/^\d+(s|m|h|d)$/i).optional(),
+});
 
 interface StrategyApiDeps {
   repository: StrategyRepository;
@@ -67,6 +84,28 @@ function parseAccountType(req: express.Request): PortfolioAccountType {
   const rawValue = (queryValue ?? bodyValue ?? "real").trim().toLowerCase();
   const parsed = accountTypeSchema.safeParse(rawValue);
   return parsed.success ? parsed.data : "real";
+}
+
+function buildAllocationMap(
+  allocations: Array<{ symbol: string; percent: number }>
+): Record<string, number> {
+  return allocations.reduce<Record<string, number>>((acc, entry) => {
+    const symbol = entry.symbol.trim().toUpperCase();
+    if (!symbol) return acc;
+    acc[symbol] = (acc[symbol] ?? 0) + entry.percent;
+    return acc;
+  }, {});
+}
+
+function allocationMapsEqual(left: Record<string, number>, right: Record<string, number>): boolean {
+  const leftEntries = Object.entries(left).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+  const rightEntries = Object.entries(right).sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+  if (leftEntries.length !== rightEntries.length) return false;
+
+  return leftEntries.every(([symbol, percent], index) => {
+    const [otherSymbol, otherPercent] = rightEntries[index] ?? [];
+    return symbol === otherSymbol && Math.abs(percent - (otherPercent ?? 0)) < 0.0001;
+  });
 }
 
 export function createStrategyRouter(deps: StrategyApiDeps): Router {
@@ -120,6 +159,219 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
     const userScope = resolveStrategyUserScope(req);
     const demoAccount = await deps.repository.resetDemoAccount(userScope);
     res.json({ demoAccount });
+  });
+
+  router.get("/rebalance-allocations", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const profiles = await deps.repository.listRebalanceAllocationProfiles(userScope);
+    res.json({ profiles });
+  });
+
+  router.post("/rebalance-allocations", async (req, res) => {
+    const parsed = rebalanceAllocationProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid rebalance allocation payload.", errors: parsed.error.issues });
+      return;
+    }
+
+    const userScope = resolveStrategyUserScope(req);
+    const strategy = await deps.repository.getStrategy(parsed.data.strategyId, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", parsed.data.strategyId);
+      return;
+    }
+    if (isBasicStrategyId(strategy.id)) {
+      res.status(400).json({ message: "Rebalance allocations must reference a usable custom strategy." });
+      return;
+    }
+    if (!strategy.isEnabled) {
+      res.status(400).json({ message: "Rebalance allocations must reference an enabled strategy." });
+      return;
+    }
+
+    const allocation = buildAllocationMap(parsed.data.allocations);
+    const totalPercent = Object.values(allocation).reduce((sum, value) => sum + value, 0);
+    if (Math.abs(totalPercent - 100) > 0.0001) {
+      res.status(400).json({ message: "Allocation percentages must total exactly 100%." });
+      return;
+    }
+
+    if (parsed.data.executionPolicy === "interval") {
+      const scheduleInterval = parsed.data.scheduleInterval?.trim().toLowerCase();
+      if (!scheduleInterval) {
+        res.status(400).json({ message: "scheduleInterval is required for interval execution." });
+        return;
+      }
+      if (parseScheduleIntervalToMs(scheduleInterval) < 5000) {
+        res.status(400).json({ message: "scheduleInterval must be at least 5 seconds." });
+        return;
+      }
+    }
+
+    const holdings = await createDemoAccountHoldings(
+      parsed.data.baseCurrency,
+      parsed.data.allocatedCapital,
+      allocation
+    );
+    const nowIso = new Date().toISOString();
+    const scheduleInterval = parsed.data.scheduleInterval?.trim().toLowerCase();
+    const profile = await deps.repository.saveRebalanceAllocationProfile(
+      {
+        id: randomUUID(),
+        name: parsed.data.name.trim(),
+        description: parsed.data.description?.trim() || undefined,
+        strategyId: strategy.id,
+        allocatedCapital: parsed.data.allocatedCapital,
+        baseCurrency: parsed.data.baseCurrency.trim().toUpperCase(),
+        allocation,
+        holdings,
+        isEnabled: parsed.data.isEnabled,
+        executionPolicy: parsed.data.executionPolicy,
+        autoExecuteMinDriftPct: parsed.data.autoExecuteMinDriftPct,
+        scheduleInterval,
+        nextExecutionAt:
+          parsed.data.isEnabled && parsed.data.executionPolicy === "interval" && scheduleInterval
+            ? createNextRunAt(nowIso, scheduleInterval)
+            : undefined,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      userScope
+    );
+
+    res.status(201).json({ profile });
+  });
+
+  router.put("/rebalance-allocations/:id", async (req, res) => {
+    const parsed = rebalanceAllocationProfileSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid rebalance allocation payload.", errors: parsed.error.issues });
+      return;
+    }
+
+    const userScope = resolveStrategyUserScope(req);
+    const existing = await deps.repository.getRebalanceAllocationProfile(req.params.id, userScope);
+    if (!existing) {
+      sendNotFound(res, "Rebalance allocation", req.params.id);
+      return;
+    }
+
+    const strategy = await deps.repository.getStrategy(parsed.data.strategyId, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", parsed.data.strategyId);
+      return;
+    }
+    if (isBasicStrategyId(strategy.id)) {
+      res.status(400).json({ message: "Rebalance allocations must reference a usable custom strategy." });
+      return;
+    }
+    if (!strategy.isEnabled) {
+      res.status(400).json({ message: "Rebalance allocations must reference an enabled strategy." });
+      return;
+    }
+
+    const allocation = buildAllocationMap(parsed.data.allocations);
+    const totalPercent = Object.values(allocation).reduce((sum, value) => sum + value, 0);
+    if (Math.abs(totalPercent - 100) > 0.0001) {
+      res.status(400).json({ message: "Allocation percentages must total exactly 100%." });
+      return;
+    }
+
+    const scheduleInterval = parsed.data.scheduleInterval?.trim().toLowerCase();
+    if (parsed.data.executionPolicy === "interval") {
+      if (!scheduleInterval) {
+        res.status(400).json({ message: "scheduleInterval is required for interval execution." });
+        return;
+      }
+      if (parseScheduleIntervalToMs(scheduleInterval) < 5000) {
+        res.status(400).json({ message: "scheduleInterval must be at least 5 seconds." });
+        return;
+      }
+    }
+
+    const requiresHoldingReset =
+      existing.baseCurrency.trim().toUpperCase() !== parsed.data.baseCurrency.trim().toUpperCase() ||
+      Math.abs(existing.allocatedCapital - parsed.data.allocatedCapital) > 0.0001 ||
+      !allocationMapsEqual(existing.allocation, allocation);
+    const holdings = requiresHoldingReset
+      ? await createDemoAccountHoldings(parsed.data.baseCurrency, parsed.data.allocatedCapital, allocation)
+      : existing.holdings;
+    const nowIso = new Date().toISOString();
+    const profile = await deps.repository.saveRebalanceAllocationProfile(
+      {
+        ...existing,
+        name: parsed.data.name.trim(),
+        description: parsed.data.description?.trim() || undefined,
+        strategyId: strategy.id,
+        allocatedCapital: parsed.data.allocatedCapital,
+        baseCurrency: parsed.data.baseCurrency.trim().toUpperCase(),
+        allocation,
+        holdings,
+        isEnabled: parsed.data.isEnabled,
+        executionPolicy: parsed.data.executionPolicy,
+        autoExecuteMinDriftPct: parsed.data.autoExecuteMinDriftPct,
+        scheduleInterval,
+        nextExecutionAt:
+          parsed.data.isEnabled && parsed.data.executionPolicy === "interval" && scheduleInterval
+            ? createNextRunAt(nowIso, scheduleInterval)
+            : undefined,
+        updatedAt: nowIso,
+      },
+      userScope
+    );
+
+    res.json({ profile });
+  });
+
+  router.delete("/rebalance-allocations/:id", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const removed = await deps.repository.deleteRebalanceAllocationProfile(req.params.id, userScope);
+    if (!removed) {
+      sendNotFound(res, "Rebalance allocation", req.params.id);
+      return;
+    }
+
+    res.json({ success: true });
+  });
+
+  router.get("/rebalance-allocations/:id/state", async (req, res) => {
+    try {
+      const userScope = resolveStrategyUserScope(req);
+      const state = await deps.runner.evaluateRebalanceAllocationProfileState(req.params.id, userScope);
+      if (!state) {
+        sendNotFound(res, "Rebalance allocation", req.params.id);
+        return;
+      }
+
+      res.json({
+        profile: state.profile,
+        strategy: state.strategy,
+        accountType: "demo",
+        currentAllocation: state.evaluation.currentAllocation,
+        baseAllocation: state.evaluation.baseAllocation,
+        adjustedTargetAllocation: state.evaluation.adjustedTargetAllocation,
+        portfolio: state.portfolio,
+        signals: state.marketSignals,
+        marketContext: state.evaluation.marketContext,
+        marketGate: state.evaluation.marketGate,
+        executionPlan: state.evaluation.executionPlan,
+        traces: state.evaluation.traces,
+        warnings: state.evaluation.warnings,
+        composition: state.evaluation.composition,
+      });
+    } catch (error) {
+      res.status(500).json({ message: error instanceof Error ? error.message : "Unable to evaluate rebalance allocation." });
+    }
+  });
+
+  router.post("/rebalance-allocations/:id/execute", async (req, res) => {
+    try {
+      const userScope = resolveStrategyUserScope(req);
+      const run = await deps.runner.executeRebalanceAllocationProfile(req.params.id, "api", userScope);
+      res.json({ run });
+    } catch (error) {
+      res.status(400).json({ message: error instanceof Error ? error.message : "Unable to execute rebalance allocation." });
+    }
   });
 
   router.get("/strategies", async (req, res) => {

@@ -426,6 +426,41 @@ export interface DemoAccountInitializeRequest {
   allocations: DemoAccountAllocationInput[];
 }
 
+export type RebalanceAllocationExecutionPolicy = "manual" | "on_strategy_run" | "interval";
+
+export interface RebalanceAllocationProfile {
+  id: string;
+  name: string;
+  description?: string;
+  strategyId: string;
+  allocatedCapital: number;
+  baseCurrency: string;
+  allocation: AllocationMap;
+  holdings: DemoAccountHolding[];
+  isEnabled: boolean;
+  executionPolicy: RebalanceAllocationExecutionPolicy;
+  autoExecuteMinDriftPct?: number;
+  scheduleInterval?: string;
+  lastEvaluatedAt?: string;
+  lastExecutedAt?: string;
+  nextExecutionAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RebalanceAllocationInput {
+  name: string;
+  description?: string;
+  strategyId: string;
+  allocatedCapital: number;
+  baseCurrency: string;
+  allocations: DemoAccountAllocationInput[];
+  isEnabled: boolean;
+  executionPolicy: RebalanceAllocationExecutionPolicy;
+  autoExecuteMinDriftPct?: number;
+  scheduleInterval?: string;
+}
+
 export type AllocationMap = Record<string, number>;
 
 export interface StrategyCondition {
@@ -587,6 +622,8 @@ export interface StrategyExecutionAction {
 export interface ExecutionPlan {
   id: string;
   strategyId: string;
+  rebalanceAllocationId?: string;
+  rebalanceAllocationName?: string;
   timestamp: string;
   accountType: PortfolioAccountType;
   mode: StrategyMode;
@@ -602,6 +639,8 @@ export interface ExecutionPlan {
 export interface StrategyRun {
   id: string;
   strategyId: string;
+  rebalanceAllocationId?: string;
+  rebalanceAllocationName?: string;
   startedAt: string;
   completedAt?: string;
   status: StrategyRunStatus;
@@ -674,6 +713,19 @@ export interface StrategyStateResponse {
     strategyScores: StrategyScoreResult[];
     activeStrategyWeights: Record<string, number>;
   };
+}
+
+export interface RebalanceAllocationProfilesResponse {
+  profiles: RebalanceAllocationProfile[];
+}
+
+export interface RebalanceAllocationProfileResponse {
+  profile: RebalanceAllocationProfile;
+}
+
+export interface RebalanceAllocationStateResponse extends StrategyStateResponse {
+  profile: RebalanceAllocationProfile;
+  strategy: StrategyConfig;
 }
 
 export interface BacktestRun {

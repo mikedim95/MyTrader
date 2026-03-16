@@ -22,12 +22,50 @@ const COMMON_SYMBOL_SUGGESTIONS = [
   "DOGE",
   "AVAX",
   "LINK",
+  "LTC",
+  "BCH",
+  "ETC",
+  "UNI",
+  "AAVE",
+  "INJ",
+  "NEAR",
+  "HBAR",
+  "SUI",
+  "TON",
+  "SHIB",
+  "PEPE",
+  "APT",
+  "ARB",
+  "OP",
+  "SEI",
+  "RUNE",
+  "MATIC",
+  "XLM",
+  "ALGO",
   "TRX",
   "DOT",
   "ATOM",
   "USDT",
   "USDC",
   "FDUSD",
+];
+
+const COMMON_PAIR_PRESETS = [
+  { base: "BTC", quote: "USDT" },
+  { base: "BTC", quote: "USDC" },
+  { base: "ETH", quote: "USDT" },
+  { base: "ETH", quote: "USDC" },
+  { base: "SOL", quote: "USDT" },
+  { base: "BNB", quote: "USDT" },
+  { base: "XRP", quote: "USDT" },
+  { base: "ADA", quote: "USDT" },
+  { base: "DOGE", quote: "USDT" },
+  { base: "TON", quote: "USDT" },
+  { base: "SUI", quote: "USDT" },
+  { base: "BTC", quote: "ETH" },
+  { base: "ETH", quote: "BTC" },
+  { base: "SOL", quote: "BTC" },
+  { base: "BNB", quote: "BTC" },
 ];
 
 const QUOTE_PRIORITY = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB"];
@@ -277,6 +315,33 @@ export function TradingPage({ accountType }: TradingPageProps) {
                 placeholder="ETH"
                 className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono uppercase text-foreground outline-none"
               />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Quick Pairs</label>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {COMMON_PAIR_PRESETS.map((preset) => {
+                const isActive = normalizedBaseSymbol === preset.base && normalizedQuoteSymbol === preset.quote;
+                return (
+                  <button
+                    key={`${preset.base}-${preset.quote}`}
+                    type="button"
+                    onClick={() => {
+                      setBaseSymbolInput(preset.base);
+                      setQuoteSymbolInput(preset.quote);
+                    }}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1.5 text-[11px] font-mono transition-colors",
+                      isActive
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-secondary hover:text-foreground"
+                    )}
+                  >
+                    {preset.base}/{preset.quote}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

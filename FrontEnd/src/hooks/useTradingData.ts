@@ -110,6 +110,27 @@ export function useFleetLive() {
   });
 }
 
+export function useRebalanceAllocationProfiles() {
+  return useQuery({
+    queryKey: ["rebalance-allocation-profiles"],
+    queryFn: backendApi.getRebalanceAllocationProfiles,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
+export function useRebalanceAllocationState(profileId: string | undefined) {
+  return useQuery({
+    queryKey: ["rebalance-allocation-state", profileId],
+    queryFn: () => backendApi.getRebalanceAllocationState(profileId ?? ""),
+    enabled: Boolean(profileId),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
 export function useFleetHistory(scope: FleetHistoryScope = "hour") {
   return useQuery({
     queryKey: ["fleet-history", scope],

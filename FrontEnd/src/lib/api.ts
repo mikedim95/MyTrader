@@ -28,6 +28,10 @@ import type {
   NicehashConnectionStatus,
   OrdersResponse,
   PortfolioAccountType,
+  RebalanceAllocationInput,
+  RebalanceAllocationProfileResponse,
+  RebalanceAllocationProfilesResponse,
+  RebalanceAllocationStateResponse,
   SessionLoginResponse,
   SessionStatusResponse,
   StrategiesResponse,
@@ -276,6 +280,28 @@ export const backendApi = {
   resetDemoAccount: () =>
     apiRequest<DemoAccountSettingsResponse>("/api/strategy-settings/demo-account", {
       method: "DELETE",
+    }),
+  getRebalanceAllocationProfiles: () =>
+    apiRequest<RebalanceAllocationProfilesResponse>("/api/rebalance-allocations"),
+  createRebalanceAllocationProfile: (body: RebalanceAllocationInput) =>
+    apiRequest<RebalanceAllocationProfileResponse>("/api/rebalance-allocations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateRebalanceAllocationProfile: (profileId: string, body: RebalanceAllocationInput) =>
+    apiRequest<RebalanceAllocationProfileResponse>(`/api/rebalance-allocations/${profileId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteRebalanceAllocationProfile: (profileId: string) =>
+    apiRequest<{ success: boolean }>(`/api/rebalance-allocations/${profileId}`, {
+      method: "DELETE",
+    }),
+  getRebalanceAllocationState: (profileId: string) =>
+    apiRequest<RebalanceAllocationStateResponse>(`/api/rebalance-allocations/${profileId}/state`),
+  executeRebalanceAllocationProfile: (profileId: string) =>
+    apiRequest<StrategyRunResponse>(`/api/rebalance-allocations/${profileId}/execute`, {
+      method: "POST",
     }),
 
   getStrategies: () => apiRequest<StrategiesResponse>("/api/strategies"),

@@ -61,6 +61,8 @@ export type StrategyMarketContextIndicator = (typeof STRATEGY_MARKET_CONTEXT_IND
 
 export const PORTFOLIO_ACCOUNT_TYPES = ["real", "demo"] as const;
 export type PortfolioAccountType = (typeof PORTFOLIO_ACCOUNT_TYPES)[number];
+export const REBALANCE_ALLOCATION_EXECUTION_POLICIES = ["manual", "on_strategy_run", "interval"] as const;
+export type RebalanceAllocationExecutionPolicy = (typeof REBALANCE_ALLOCATION_EXECUTION_POLICIES)[number];
 
 export const STRATEGY_RUN_STATUSES = ["pending", "running", "completed", "failed", "skipped"] as const;
 export type StrategyRunStatus = (typeof STRATEGY_RUN_STATUSES)[number];
@@ -168,6 +170,26 @@ export interface DemoAccountSettings {
 export interface DemoAccountAllocationInput {
   symbol: string;
   percent: number;
+}
+
+export interface RebalanceAllocationProfile {
+  id: string;
+  name: string;
+  description?: string;
+  strategyId: string;
+  allocatedCapital: number;
+  baseCurrency: string;
+  allocation: AllocationMap;
+  holdings: DemoAccountHolding[];
+  isEnabled: boolean;
+  executionPolicy: RebalanceAllocationExecutionPolicy;
+  autoExecuteMinDriftPct?: number;
+  scheduleInterval?: string;
+  lastEvaluatedAt?: string;
+  lastExecutedAt?: string;
+  nextExecutionAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StrategyMarketContextSnapshot {
@@ -313,6 +335,8 @@ export interface ExecutionAction {
 export interface ExecutionPlan {
   id: string;
   strategyId: string;
+  rebalanceAllocationId?: string;
+  rebalanceAllocationName?: string;
   timestamp: string;
   accountType: PortfolioAccountType;
   mode: StrategyMode;
@@ -349,6 +373,8 @@ export interface StrategyEvaluationResult {
 export interface StrategyRun {
   id: string;
   strategyId: string;
+  rebalanceAllocationId?: string;
+  rebalanceAllocationName?: string;
   startedAt: string;
   completedAt?: string;
   status: StrategyRunStatus;
@@ -442,6 +468,7 @@ export interface HistoricalMarketDataSource {
 
 export interface StrategyStoreData {
   strategies: StrategyConfig[];
+  rebalanceAllocationProfiles: RebalanceAllocationProfile[];
   strategyRuns: StrategyRun[];
   executionPlans: ExecutionPlan[];
   backtestRuns: BacktestRun[];

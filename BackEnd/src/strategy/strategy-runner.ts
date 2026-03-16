@@ -10,6 +10,7 @@ import {
   MarketSignalSnapshot,
   PortfolioAccountType,
   PortfolioState,
+  RebalanceAllocationProfile,
   StrategyConfig,
   StrategyEvaluationResult,
   StrategyMarketContextSnapshot,
@@ -21,12 +22,22 @@ export class StrategyRunner {
 
   constructor(private readonly repository: StrategyRepository, private readonly engine = new StrategyEngine()) {}
 
-  private runKey(strategyId: string, accountType: PortfolioAccountType, userScope?: StrategyUserScope): string {
-    return `${strategyUserScopeKey(userScope)}:${strategyId}:${accountType}`;
+  private runKey(
+    strategyId: string,
+    accountType: PortfolioAccountType,
+    userScope?: StrategyUserScope,
+    executionScopeKey = "default"
+  ): string {
+    return `${strategyUserScopeKey(userScope)}:${strategyId}:${accountType}:${executionScopeKey}`;
   }
 
-  isRunning(strategyId: string, accountType: PortfolioAccountType = "real", userScope?: StrategyUserScope): boolean {
-    return this.activeStrategies.has(this.runKey(strategyId, accountType, userScope));
+  isRunning(
+    strategyId: string,
+    accountType: PortfolioAccountType = "real",
+    userScope?: StrategyUserScope,
+    executionScopeKey = "default"
+  ): boolean {
+    return this.activeStrategies.has(this.runKey(strategyId, accountType, userScope, executionScopeKey));
   }
 
   private async resolveDemoSettings(
@@ -49,18 +60,42 @@ export class StrategyRunner {
     return buildLiveStrategyMarketContext(timestamp, detectMarketRegime(marketSignals));
   }
 
-  private async evaluatePreparedStrategy(
+  private createProfileDemoSettings(profile: RebalanceAllocationProfile): DemoAccountSettings {
+    return {
+      balance: profile.allocatedCapital,
+      updatedAt: profile.updatedAt,
+      holdings: profile.holdings.map((holding) => ({ ...holding })),
+    };
+  }
+
+  private attachProfileToEvaluation(
+    evaluation: StrategyEvaluationResult,
+    profile: RebalanceAllocationProfile
+  ): StrategyEvaluationResult {
+    return {
+      ...evaluation,
+      executionPlan: {
+        ...evaluation.executionPlan,
+        rebalanceAllocationId: profile.id,
+        rebalanceAllocationName: profile.name,
+      },
+    };
+  }
+
+  private async evaluateResolvedStrategy(
     strategy: StrategyConfig,
     accountType: PortfolioAccountType,
-    userScope?: StrategyUserScope
+    userScope?: StrategyUserScope,
+    options?: { demoAccount?: DemoAccountSettings; baseCurrency?: string }
   ): Promise<{
     portfolio: PortfolioState;
     marketSignals: MarketSignalSnapshot;
     marketContext: StrategyMarketContextSnapshot;
     evaluation: StrategyEvaluationResult;
   }> {
-    const demoSettings = await this.resolveDemoSettings(accountType, userScope);
-    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount: demoSettings, userScope });
+    const demoSettings = options?.demoAccount ?? (await this.resolveDemoSettings(accountType, userScope));
+    const baseCurrency = options?.baseCurrency ?? "USDC";
+    const portfolio = await getPortfolioState(accountType, baseCurrency, { demoAccount: demoSettings, userScope });
     const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
     const marketContext = await this.buildMarketContext(marketSignals, portfolio.timestamp);
     const strategyUniverse = await this.buildStrategyUniverse(userScope);
@@ -79,6 +114,19 @@ export class StrategyRunner {
       marketContext,
       evaluation,
     };
+  }
+
+  private async evaluatePreparedStrategy(
+    strategy: StrategyConfig,
+    accountType: PortfolioAccountType,
+    userScope?: StrategyUserScope
+  ): Promise<{
+    portfolio: PortfolioState;
+    marketSignals: MarketSignalSnapshot;
+    marketContext: StrategyMarketContextSnapshot;
+    evaluation: StrategyEvaluationResult;
+  }> {
+    return this.evaluateResolvedStrategy(strategy, accountType, userScope);
   }
 
   async evaluateStrategyState(
@@ -124,6 +172,69 @@ export class StrategyRunner {
     };
   }
 
+  async evaluateRebalanceAllocationProfileState(
+    profileId: string,
+    userScope?: StrategyUserScope
+  ): Promise<{
+    profile: RebalanceAllocationProfile;
+    strategy: StrategyConfig;
+    evaluation: StrategyEvaluationResult;
+    portfolio: PortfolioState;
+    marketSignals: MarketSignalSnapshot;
+    marketContext: StrategyMarketContextSnapshot;
+  } | null> {
+    const profile = await this.repository.getRebalanceAllocationProfile(profileId, userScope);
+    if (!profile) return null;
+
+    const strategy = await this.repository.getStrategy(profile.strategyId, userScope);
+    if (!strategy) {
+      throw new Error(`Strategy ${profile.strategyId} linked to allocation ${profile.name} was not found.`);
+    }
+    if (!strategy.isEnabled) {
+      throw new Error(`Strategy ${strategy.name} linked to allocation ${profile.name} is disabled.`);
+    }
+
+    const scopedStrategy: StrategyConfig = {
+      ...strategy,
+      baseAllocation: { ...profile.allocation },
+    };
+
+    const prepared = await this.evaluateResolvedStrategy(scopedStrategy, "demo", userScope, {
+      demoAccount: this.createProfileDemoSettings(profile),
+      baseCurrency: profile.baseCurrency,
+    });
+
+    return {
+      profile,
+      strategy,
+      evaluation: this.attachProfileToEvaluation(prepared.evaluation, profile),
+      portfolio: prepared.portfolio,
+      marketSignals: prepared.marketSignals,
+      marketContext: prepared.marketContext,
+    };
+  }
+
+  private async autoExecuteLinkedProfiles(
+    strategyId: string,
+    trigger: StrategyRun["trigger"],
+    userScope?: StrategyUserScope
+  ): Promise<void> {
+    const profiles = await this.repository.listRebalanceAllocationProfilesByStrategy(strategyId, userScope);
+    const eligibleProfiles = profiles.filter((profile) => profile.isEnabled && profile.executionPolicy === "on_strategy_run");
+    if (eligibleProfiles.length === 0) return;
+
+    for (const profile of eligibleProfiles) {
+      try {
+        await this.executeRebalanceAllocationProfile(profile.id, trigger, userScope, { respectAutoThreshold: true });
+      } catch (error) {
+        console.error(
+          `[strategy-runner] auto-execution failed for profile=${profile.id} strategy=${strategyId}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+  }
+
   async runStrategy(
     strategyId: string,
     trigger: StrategyRun["trigger"] = "api",
@@ -161,9 +272,7 @@ export class StrategyRunner {
             ? "Strategy run skipped because the strategy is disabled."
             : "Strategy run skipped because manual strategies do not run on the scheduler.",
         ],
-        skipReason: !strategy.isEnabled
-          ? "Strategy is disabled."
-          : "Manual strategies do not run on the scheduler.",
+        skipReason: !strategy.isEnabled ? "Strategy is disabled." : "Manual strategies do not run on the scheduler.",
       }, userScope);
     }
 
@@ -184,50 +293,67 @@ export class StrategyRunner {
         userScope
       );
 
-      run = (await this.repository.updateStrategyRun(run.id, {
-        inputSnapshot: {
-          portfolio,
-          marketSignals,
-          marketContext,
+      run = (await this.repository.updateStrategyRun(
+        run.id,
+        {
+          inputSnapshot: {
+            portfolio,
+            marketSignals,
+            marketContext,
+          },
         },
-      }, userScope)) ?? run;
+        userScope
+      )) ?? run;
 
       await this.repository.saveExecutionPlan(evaluation.executionPlan, userScope);
 
       if (evaluation.marketGate && !evaluation.marketGate.passed) {
-        const skipped = await this.repository.updateStrategyRun(run.id, {
-          status: "skipped",
-          completedAt: new Date().toISOString(),
-          accountType,
-          adjustedAllocation: evaluation.adjustedTargetAllocation,
-          executionPlanId: evaluation.executionPlan.id,
-          warnings: evaluation.warnings,
-          marketGate: evaluation.marketGate,
-          skipReason: evaluation.marketGate.blockingReasons[0] ?? "Strategy execution blocked by market context gate.",
-        }, userScope);
+        const skipped = await this.repository.updateStrategyRun(
+          run.id,
+          {
+            status: "skipped",
+            completedAt: new Date().toISOString(),
+            accountType,
+            adjustedAllocation: evaluation.adjustedTargetAllocation,
+            executionPlanId: evaluation.executionPlan.id,
+            warnings: evaluation.warnings,
+            marketGate: evaluation.marketGate,
+            skipReason: evaluation.marketGate.blockingReasons[0] ?? "Strategy execution blocked by market context gate.",
+          },
+          userScope
+        );
 
         return skipped ?? run;
       }
 
       const completedAt = new Date().toISOString();
-      const completed = await this.repository.updateStrategyRun(run.id, {
-        status: "completed",
-        completedAt,
-        accountType,
-        adjustedAllocation: evaluation.adjustedTargetAllocation,
-        executionPlanId: evaluation.executionPlan.id,
-        warnings: evaluation.warnings,
-      }, userScope);
+      const completed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "completed",
+          completedAt,
+          accountType,
+          adjustedAllocation: evaluation.adjustedTargetAllocation,
+          executionPlanId: evaluation.executionPlan.id,
+          warnings: evaluation.warnings,
+        },
+        userScope
+      );
 
       await this.repository.updateStrategyRunTimestamps(strategy.id, completedAt, userScope);
+      await this.autoExecuteLinkedProfiles(strategy.id, trigger, userScope);
 
       return completed ?? run;
     } catch (error) {
-      const failed = await this.repository.updateStrategyRun(run.id, {
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : "Strategy run failed.",
-      }, userScope);
+      const failed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Strategy run failed.",
+        },
+        userScope
+      );
 
       return failed ?? run;
     } finally {
@@ -281,27 +407,35 @@ export class StrategyRunner {
         userScope
       );
 
-      run = (await this.repository.updateStrategyRun(run.id, {
-        inputSnapshot: {
-          portfolio,
-          marketSignals,
-          marketContext,
+      run = (await this.repository.updateStrategyRun(
+        run.id,
+        {
+          inputSnapshot: {
+            portfolio,
+            marketSignals,
+            marketContext,
+          },
         },
-      }, userScope)) ?? run;
+        userScope
+      )) ?? run;
 
       await this.repository.saveExecutionPlan(evaluation.executionPlan, userScope);
 
       if (evaluation.marketGate && !evaluation.marketGate.passed) {
-        const skipped = await this.repository.updateStrategyRun(run.id, {
-          status: "skipped",
-          completedAt: new Date().toISOString(),
-          accountType,
-          adjustedAllocation: evaluation.adjustedTargetAllocation,
-          executionPlanId: evaluation.executionPlan.id,
-          warnings: evaluation.warnings,
-          marketGate: evaluation.marketGate,
-          skipReason: evaluation.marketGate.blockingReasons[0] ?? "Strategy execution blocked by market context gate.",
-        }, userScope);
+        const skipped = await this.repository.updateStrategyRun(
+          run.id,
+          {
+            status: "skipped",
+            completedAt: new Date().toISOString(),
+            accountType,
+            adjustedAllocation: evaluation.adjustedTargetAllocation,
+            executionPlanId: evaluation.executionPlan.id,
+            warnings: evaluation.warnings,
+            marketGate: evaluation.marketGate,
+            skipReason: evaluation.marketGate.blockingReasons[0] ?? "Strategy execution blocked by market context gate.",
+          },
+          userScope
+        );
 
         return skipped ?? run;
       }
@@ -326,24 +460,218 @@ export class StrategyRunner {
         executionWarnings.push("Demo rebalance executed at current market prices.");
       }
 
-      const completed = await this.repository.updateStrategyRun(run.id, {
-        status: "completed",
-        completedAt,
-        accountType,
-        adjustedAllocation: evaluation.adjustedTargetAllocation,
-        executionPlanId: evaluation.executionPlan.id,
-        warnings: executionWarnings,
-      }, userScope);
+      const completed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "completed",
+          completedAt,
+          accountType,
+          adjustedAllocation: evaluation.adjustedTargetAllocation,
+          executionPlanId: evaluation.executionPlan.id,
+          warnings: executionWarnings,
+        },
+        userScope
+      );
 
       await this.repository.updateStrategyRunTimestamps(strategy.id, completedAt, userScope);
 
       return completed ?? run;
     } catch (error) {
-      const failed = await this.repository.updateStrategyRun(run.id, {
-        status: "failed",
-        completedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : "Strategy execution failed.",
+      const failed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Strategy execution failed.",
+        },
+        userScope
+      );
+
+      return failed ?? run;
+    } finally {
+      this.activeStrategies.delete(runKey);
+    }
+  }
+
+  async executeRebalanceAllocationProfile(
+    profileId: string,
+    trigger: StrategyRun["trigger"] = "api",
+    userScope?: StrategyUserScope,
+    options?: { respectAutoThreshold?: boolean }
+  ): Promise<StrategyRun> {
+    const profile = await this.repository.getRebalanceAllocationProfile(profileId, userScope);
+    if (!profile) {
+      throw new Error(`Rebalance allocation ${profileId} was not found.`);
+    }
+
+    const strategy = await this.repository.getStrategy(profile.strategyId, userScope);
+    if (!strategy) {
+      throw new Error(`Strategy ${profile.strategyId} linked to allocation ${profile.name} was not found.`);
+    }
+    if (!strategy.isEnabled) {
+      return this.repository.createStrategyRun(
+        {
+          strategyId: profile.strategyId,
+          rebalanceAllocationId: profile.id,
+          rebalanceAllocationName: profile.name,
+          status: "skipped",
+          accountType: "demo",
+          mode: strategy.executionMode,
+          trigger,
+          warnings: ["Allocation execution skipped because the linked strategy is disabled."],
+          skipReason: "Linked strategy is disabled.",
+        },
+        userScope
+      );
+    }
+
+    const runKey = this.runKey(strategy.id, "demo", userScope, profile.id);
+    if (this.activeStrategies.has(runKey)) {
+      return this.repository.createStrategyRun({
+        strategyId: strategy.id,
+        rebalanceAllocationId: profile.id,
+        rebalanceAllocationName: profile.name,
+        status: "skipped",
+        accountType: "demo",
+        mode: strategy.executionMode,
+        trigger,
+        warnings: ["Allocation execution skipped because another run is already active."],
+        skipReason: "Allocation run already in progress.",
       }, userScope);
+    }
+
+    this.activeStrategies.add(runKey);
+
+    let run = await this.repository.createStrategyRun({
+      strategyId: strategy.id,
+      rebalanceAllocationId: profile.id,
+      rebalanceAllocationName: profile.name,
+      status: "running",
+      accountType: "demo",
+      mode: strategy.executionMode,
+      trigger,
+    }, userScope);
+
+    try {
+      const scopedStrategy: StrategyConfig = {
+        ...strategy,
+        baseAllocation: { ...profile.allocation },
+      };
+
+      const { portfolio, marketSignals, marketContext, evaluation } = await this.evaluateResolvedStrategy(scopedStrategy, "demo", userScope, {
+        demoAccount: this.createProfileDemoSettings(profile),
+        baseCurrency: profile.baseCurrency,
+      });
+      const evaluationWithProfile = this.attachProfileToEvaluation(evaluation, profile);
+      const evaluatedAt = new Date().toISOString();
+
+      await this.repository.markRebalanceAllocationProfileEvaluated(profile.id, evaluatedAt, userScope);
+
+      run = (await this.repository.updateStrategyRun(
+        run.id,
+        {
+          inputSnapshot: {
+            portfolio,
+            marketSignals,
+            marketContext,
+          },
+        },
+        userScope
+      )) ?? run;
+
+      await this.repository.saveExecutionPlan(evaluationWithProfile.executionPlan, userScope);
+
+      if (evaluationWithProfile.marketGate && !evaluationWithProfile.marketGate.passed) {
+        const skipped = await this.repository.updateStrategyRun(
+          run.id,
+          {
+            status: "skipped",
+            completedAt: evaluatedAt,
+            accountType: "demo",
+            adjustedAllocation: evaluationWithProfile.adjustedTargetAllocation,
+            executionPlanId: evaluationWithProfile.executionPlan.id,
+            warnings: evaluationWithProfile.warnings,
+            marketGate: evaluationWithProfile.marketGate,
+            skipReason:
+              evaluationWithProfile.marketGate.blockingReasons[0] ?? "Allocation execution blocked by market context gate.",
+          },
+          userScope
+        );
+
+        return skipped ?? run;
+      }
+
+      const driftThreshold = profile.autoExecuteMinDriftPct ?? 0;
+      if (
+        options?.respectAutoThreshold &&
+        Number.isFinite(driftThreshold) &&
+        driftThreshold > 0 &&
+        evaluationWithProfile.executionPlan.driftPct < driftThreshold
+      ) {
+        const skipped = await this.repository.updateStrategyRun(
+          run.id,
+          {
+            status: "skipped",
+            completedAt: evaluatedAt,
+            accountType: "demo",
+            adjustedAllocation: evaluationWithProfile.adjustedTargetAllocation,
+            executionPlanId: evaluationWithProfile.executionPlan.id,
+            warnings: [
+              ...evaluationWithProfile.warnings,
+              `Auto execution skipped because drift ${evaluationWithProfile.executionPlan.driftPct.toFixed(2)}% is below threshold ${driftThreshold.toFixed(2)}%.`,
+            ],
+            skipReason: "Auto execution threshold not met.",
+          },
+          userScope
+        );
+
+        return skipped ?? run;
+      }
+
+      const completedAt = new Date().toISOString();
+      const executionWarnings = [...evaluationWithProfile.warnings];
+
+      if (!evaluationWithProfile.executionPlan.rebalanceRequired) {
+        executionWarnings.push("No rebalance was required. Allocation holdings were left unchanged.");
+      } else {
+        if (!Number.isFinite(portfolio.totalValue) || portfolio.totalValue <= 0) {
+          throw new Error("Allocation has no value to rebalance. Seed it before executing.");
+        }
+
+        const nextHoldings = await createDemoAccountHoldings(
+          profile.baseCurrency,
+          portfolio.totalValue,
+          evaluationWithProfile.adjustedTargetAllocation
+        );
+
+        await this.repository.applyRebalanceAllocationProfileExecution(profile.id, nextHoldings, completedAt, userScope);
+        executionWarnings.push("Allocation rebalance executed at current market prices.");
+      }
+
+      const completed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "completed",
+          completedAt,
+          accountType: "demo",
+          adjustedAllocation: evaluationWithProfile.adjustedTargetAllocation,
+          executionPlanId: evaluationWithProfile.executionPlan.id,
+          warnings: executionWarnings,
+        },
+        userScope
+      );
+
+      return completed ?? run;
+    } catch (error) {
+      const failed = await this.repository.updateStrategyRun(
+        run.id,
+        {
+          status: "failed",
+          completedAt: new Date().toISOString(),
+          error: error instanceof Error ? error.message : "Allocation execution failed.",
+        },
+        userScope
+      );
 
       return failed ?? run;
     } finally {
