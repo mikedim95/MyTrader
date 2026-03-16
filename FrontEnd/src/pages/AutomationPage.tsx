@@ -20,6 +20,7 @@ import type {
   StrategyOperator,
 } from "@/types/api";
 import { SpinnerValue } from "@/components/SpinnerValue";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface AutomationPageProps {
@@ -1370,6 +1371,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       setDraftStrategyId(result.strategy.id);
       setDraftDirty(false);
       setEditorMode("edit");
+      closeStrategyEditor();
       await invalidateAll();
     },
     onError: (error) => {
@@ -1748,7 +1750,15 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
             </thead>
             <tbody>
               {loadingStrategies ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading strategies...</td></tr>
+                Array.from({ length: 4 }).map((_, rowIndex) => (
+                  <tr key={`strategy-skeleton-${rowIndex}`} className="border-b border-border">
+                    {Array.from({ length: 6 }).map((__, cellIndex) => (
+                      <td key={`strategy-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
+                        <Skeleton className="h-4 w-full" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
               ) : usableStrategies.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No usable strategies created yet.</td></tr>
               ) : (
@@ -1818,7 +1828,14 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
           <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
             <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Market Preview</div>
             {loadingStrategyState ? (
-              <div className="text-xs text-muted-foreground">Loading BTC market context...</div>
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <div className="grid grid-cols-2 gap-2">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <Skeleton key={`strategy-preview-skeleton-${index}`} className="h-14 w-full" />
+                  ))}
+                </div>
+              </div>
             ) : strategyStateError ? (
               <div className="rounded border border-negative/30 bg-negative/10 px-2 py-1 text-xs text-negative">
                 {strategyStateError instanceof Error ? strategyStateError.message : "Preview unavailable."}
@@ -2714,7 +2731,15 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
             </div>
 
             {loadingRunDetails ? (
-              <div className="text-sm text-muted-foreground">Loading selected run details...</div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <Skeleton key={`run-detail-metric-skeleton-${index}`} className="h-14 w-full" />
+                  ))}
+                </div>
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
             ) : !selectedRun ? (
               <div className="text-sm text-muted-foreground">Select a run to inspect.</div>
             ) : (
@@ -2893,64 +2918,91 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="rounded-lg border border-border bg-card overflow-hidden">
           <div className="px-5 py-4 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Strategy Runs</div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border">
-                {["Started", "Strategy", "Account", "Status", "Trigger", "Completed", "Duration", "Warn", "Actions"].map((heading) => (
-                  <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loadingRuns ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-muted-foreground">Loading runs...</td></tr>
-              ) : runs.length === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-muted-foreground">No runs yet.</td></tr>
-              ) : (
-                runs.slice(0, 12).map((run) => (
-                  <tr
-                    key={run.id}
-                    className={cn("border-b border-border cursor-pointer", run.id === selectedRunId ? "bg-secondary/40" : "hover:bg-secondary/20")}
-                    onClick={() => setSelectedRunId(run.id)}
-                  >
-                    <td className="py-3 px-4 text-left text-xs font-mono text-muted-foreground">{formatDateTime(run.startedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.strategyId}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.accountType}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono">
-                      <span
-                        className={
-                          run.status === "completed"
-                            ? "text-positive"
-                            : run.status === "failed"
-                              ? "text-negative"
-                              : run.status === "skipped"
-                                ? "text-amber-200"
-                                : "text-muted-foreground"
-                        }
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px]">
+              <thead>
+                <tr className="border-b border-border">
+                  {["Started", "Strategy", "Account", "Status", "Trigger", "Completed", "Duration", "Warn", "Actions"].map((heading) => (
+                    <th
+                      key={heading}
+                      className={cn(
+                        "py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left",
+                        heading === "Actions" ? "sticky right-0 z-10 bg-card" : ""
+                      )}
+                    >
+                      {heading}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+                <tbody>
+                  {loadingRuns ? (
+                  Array.from({ length: 5 }).map((_, rowIndex) => (
+                    <tr key={`run-skeleton-${rowIndex}`} className="border-b border-border">
+                      {Array.from({ length: 9 }).map((__, cellIndex) => (
+                        <td key={`run-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
+                          <Skeleton className={cn("h-4", cellIndex === 8 ? "ml-auto w-14" : "w-full")} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : runs.length === 0 ? (
+                  <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-muted-foreground">No runs yet.</td></tr>
+                ) : (
+                  runs.slice(0, 12).map((run) => {
+                    const selected = run.id === selectedRunId;
+
+                    return (
+                      <tr
+                        key={run.id}
+                        className={cn("group border-b border-border cursor-pointer", selected ? "bg-secondary/40" : "hover:bg-secondary/20")}
+                        onClick={() => setSelectedRunId(run.id)}
                       >
-                        {run.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.trigger}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(run.completedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{formatDuration(run.startedAt, run.completedAt)}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.warnings.length}</td>
-                    <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openRunDetails(run.id);
-                        }}
-                        className="px-2 py-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        <td className="py-3 px-4 text-left text-xs font-mono text-muted-foreground">{formatDateTime(run.startedAt)}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.strategyId}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.accountType}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono">
+                          <span
+                            className={
+                              run.status === "completed"
+                                ? "text-positive"
+                                : run.status === "failed"
+                                  ? "text-negative"
+                                  : run.status === "skipped"
+                                    ? "text-amber-200"
+                                    : "text-muted-foreground"
+                            }
+                          >
+                            {run.status}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.trigger}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-muted-foreground">{formatDateTime(run.completedAt)}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{formatDuration(run.startedAt, run.completedAt)}</td>
+                        <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{run.warnings.length}</td>
+                        <td
+                          className={cn(
+                            "sticky right-0 z-10 py-3 px-4 text-right text-xs font-mono text-foreground",
+                            selected ? "bg-secondary/40" : "bg-card group-hover:bg-secondary/20"
+                          )}
+                        >
+                          <button
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openRunDetails(run.id);
+                            }}
+                            className="px-2 py-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <div className="border-t border-border px-4 py-3 text-xs font-mono text-muted-foreground">
             Use <span className="text-foreground">View</span> on a run row to open detailed results.
@@ -2976,7 +3028,15 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
                 <thead><tr className="border-b border-border">{["Created", "Strategy", "Status", "Return %"].map((heading) => <th key={heading} className="py-2 px-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>)}</tr></thead>
                 <tbody>
                   {loadingBacktests ? (
-                    <tr><td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">Loading backtests...</td></tr>
+                    Array.from({ length: 4 }).map((_, rowIndex) => (
+                      <tr key={`backtest-skeleton-${rowIndex}`} className="border-b border-border">
+                        {Array.from({ length: 4 }).map((__, cellIndex) => (
+                          <td key={`backtest-skeleton-${rowIndex}-${cellIndex}`} className="px-3 py-2">
+                            <Skeleton className="h-4 w-full" />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
                   ) : backtests.length === 0 ? (
                     <tr><td colSpan={4} className="px-3 py-4 text-center text-xs text-muted-foreground">No backtests yet.</td></tr>
                   ) : (

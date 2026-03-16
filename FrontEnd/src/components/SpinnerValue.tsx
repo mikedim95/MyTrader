@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 interface SpinnerValueProps {
@@ -18,7 +18,7 @@ export function SpinnerValue({
   spinnerClassName,
 }: SpinnerValueProps) {
   if (loading) {
-    return <Loader2 className={cn("h-4 w-4 animate-spin text-muted-foreground", spinnerClassName)} />;
+    return <Skeleton className={cn("inline-block h-[1em] w-[8ch] align-middle", className, spinnerClassName)} />;
   }
 
   return <span className={className}>{value ?? placeholder}</span>;

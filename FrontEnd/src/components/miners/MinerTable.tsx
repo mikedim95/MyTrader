@@ -1,5 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,6 +14,7 @@ import type { MinerEntity, MinerLiveData } from "@/types/api";
 interface MinerTableProps {
   miners: MinerEntity[];
   fleetLive: MinerLiveData[];
+  isLoading?: boolean;
   onOpen: (minerId: number) => void;
   onVerify: (minerId: number) => void;
   onCommand: (minerId: number, action: "restart" | "reboot" | "start" | "stop" | "pause" | "resume") => void;
@@ -27,7 +29,7 @@ function getLiveMap(fleetLive: MinerLiveData[]): Map<number, MinerLiveData> {
   return new Map(fleetLive.map((miner) => [miner.minerId, miner]));
 }
 
-export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: MinerTableProps) {
+export function MinerTable({ miners, fleetLive, isLoading = false, onOpen, onVerify, onCommand }: MinerTableProps) {
   const liveMap = getLiveMap(fleetLive);
 
   return (
@@ -50,7 +52,17 @@ export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: M
         </TableHeader>
 
         <TableBody>
-          {miners.map((miner) => {
+          {isLoading
+            ? Array.from({ length: 6 }).map((_, rowIndex) => (
+                <TableRow key={`miner-skeleton-${rowIndex}`}>
+                  {Array.from({ length: 11 }).map((__, cellIndex) => (
+                    <TableCell key={`miner-skeleton-${rowIndex}-${cellIndex}`}>
+                      <Skeleton className="h-4 w-full" />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            : miners.map((miner) => {
             const live = liveMap.get(miner.id);
             const maxBoard = live?.boardTemps.length ? Math.max(...live.boardTemps) : null;
             const maxHotspot = live?.hotspotTemps.length ? Math.max(...live.hotspotTemps) : null;

@@ -6,6 +6,7 @@ import { BulkActionToolbar } from "@/components/miners/BulkActionToolbar";
 import { MinerStatusBadge } from "@/components/miners/MinerStatusBadge";
 import type { MinerStatus } from "@/data/minerMockData";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function formatBalance(value: number | null | undefined): string {
   if (value === null || value === undefined) return "--";
@@ -188,8 +189,10 @@ export function NicehashPage() {
         </div>
 
         {isLoading ? (
-          <div className="px-5 py-6">
-            <SpinnerValue loading value={undefined} />
+          <div className="px-5 py-6 space-y-3">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={`wallet-skeleton-${index}`} className="h-8 w-full" />
+            ))}
           </div>
         ) : assets.length === 0 ? (
           <div className="px-5 py-6 text-sm text-muted-foreground">
@@ -233,8 +236,10 @@ export function NicehashPage() {
         </div>
 
         {isLoading ? (
-          <div className="px-5 py-6">
-            <SpinnerValue loading value={undefined} />
+          <div className="px-5 py-6 space-y-3">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Skeleton key={`miner-skeleton-${index}`} className="h-10 w-full" />
+            ))}
           </div>
         ) : miners.length === 0 ? (
           <div className="px-5 py-6 text-sm text-muted-foreground">

@@ -3,9 +3,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { backendApi } from "@/lib/api";
-import { useRebalanceAllocationProfiles, useRebalanceAllocationState, useStrategies } from "@/hooks/useTradingData";
+import { useDashboardData, useRebalanceAllocationProfiles, useRebalanceAllocationState, useStrategies } from "@/hooks/useTradingData";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type {
+  Asset,
   DemoAccountAllocationInput,
   PortfolioAccountType,
   RebalanceAllocationExecutionPolicy,
@@ -54,7 +56,6 @@ const EXECUTION_POLICY_META: Record<
 };
 
 const BASE_CURRENCY_OPTIONS = ["USDC", "USDT", "FDUSD", "USD"];
-const COMMON_ALLOCATION_SYMBOLS = ["BTC", "ETH", "SOL", "BNB", "USDC", "USDT", "XRP", "ADA", "DOGE", "AVAX", "LINK", "TON", "SUI", "TRX"];
 
 interface RebalancePageProps {
   accountType: PortfolioAccountType;
@@ -116,6 +117,11 @@ function formatUsd(value: number | undefined): string {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+function formatNotional(value: number | undefined, currency: string): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "--";
+  return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
 function createRowId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -127,18 +133,45 @@ function createDraftAllocationRow(symbol = "", percent = ""): DraftAllocationRow
   return { id: createRowId(), symbol, percent };
 }
 
-function createDefaultFormState(strategyId = ""): AllocationFormState {
+function buildDefaultAllocationRows(assetSymbols: string[], baseCurrency: string): DraftAllocationRow[] {
+  const normalizedBaseCurrency = normalizeSymbol(baseCurrency);
+  const orderedSymbols = Array.from(new Set(assetSymbols.map((symbol) => normalizeSymbol(symbol)).filter(Boolean)));
+  const preferredSymbols = [
+    ...orderedSymbols.filter((symbol) => symbol !== normalizedBaseCurrency),
+    ...orderedSymbols.filter((symbol) => symbol === normalizedBaseCurrency),
+  ].slice(0, 3);
+
+  if (preferredSymbols.length === 0) {
+    return [createDraftAllocationRow(normalizedBaseCurrency, "100")];
+  }
+
+  if (preferredSymbols.length === 1) {
+    return [createDraftAllocationRow(preferredSymbols[0], "100")];
+  }
+
+  if (preferredSymbols.length === 2) {
+    return [createDraftAllocationRow(preferredSymbols[0], "60"), createDraftAllocationRow(preferredSymbols[1], "40")];
+  }
+
+  return [
+    createDraftAllocationRow(preferredSymbols[0], "40"),
+    createDraftAllocationRow(preferredSymbols[1], "30"),
+    createDraftAllocationRow(preferredSymbols[2], "30"),
+  ];
+}
+
+function createDefaultFormState(strategyId = "", assetSymbols: string[] = [], baseCurrency = "USDC"): AllocationFormState {
   return {
     name: "",
     description: "",
     strategyId,
     allocatedCapital: "500",
-    baseCurrency: "USDC",
+    baseCurrency,
     executionPolicy: "manual",
     autoExecuteMinDriftPct: "2",
     scheduleInterval: "1d",
     isEnabled: true,
-    allocationRows: [createDraftAllocationRow("BTC", "40"), createDraftAllocationRow("ETH", "30"), createDraftAllocationRow("USDC", "30")],
+    allocationRows: buildDefaultAllocationRows(assetSymbols, baseCurrency),
   };
 }
 
@@ -171,6 +204,15 @@ function buildAllocationSignature(rows: AllocationRow[]): string {
 
 function buildChartSignature(data: AllocationChartSlice[]): string {
   return data.map((entry) => `${entry.name}:${entry.value.toFixed(4)}`).join("|");
+}
+
+function getAllocationEntries(allocation: RebalanceAllocationProfile["allocation"]): Array<[string, number]> {
+  return Object.entries(allocation).sort((left, right) => {
+    if (right[1] !== left[1]) {
+      return right[1] - left[1];
+    }
+    return left[0].localeCompare(right[0]);
+  });
 }
 
 function renderAllocationLabel({ name, value }: { name?: string; value?: number }): string {
@@ -220,6 +262,7 @@ const AllocationPieCard = memo(
 
 export function RebalancePage({ accountType }: RebalancePageProps) {
   const queryClient = useQueryClient();
+  const { data: dashboardData } = useDashboardData(accountType);
 
   const { data: strategiesData, isPending: loadingStrategies, error: strategiesError } = useStrategies();
   const usableStrategies = useMemo(
@@ -241,6 +284,27 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
+  const portfolioAssets = dashboardData?.assets ?? [];
+  const portfolioAssetMap = useMemo(
+    () =>
+      portfolioAssets.reduce<Record<string, Asset>>((map, asset) => {
+        map[asset.symbol.toUpperCase()] = asset;
+        return map;
+      }, {}),
+    [portfolioAssets]
+  );
+
+  const allocationAssetOptions = useMemo(() => {
+    const selectedSymbols = formState.allocationRows.map((row) => normalizeSymbol(row.symbol)).filter(Boolean);
+    return Array.from(
+      new Set([
+        ...portfolioAssets.map((asset) => asset.symbol.toUpperCase()),
+        normalizeSymbol(formState.baseCurrency),
+        ...selectedSymbols,
+      ])
+    );
+  }, [formState.allocationRows, formState.baseCurrency, portfolioAssets]);
+
   useEffect(() => {
     if (!selectedProfileId || !profiles.some((profile) => profile.id === selectedProfileId)) {
       setSelectedProfileId(profiles[0]?.id ?? "");
@@ -249,9 +313,11 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
   useEffect(() => {
     if (!profileModalOpen && !editingProfileId) {
-      setFormState((current) => (current.strategyId ? current : createDefaultFormState(usableStrategies[0]?.id ?? "")));
+      setFormState((current) =>
+        current.strategyId ? current : createDefaultFormState(usableStrategies[0]?.id ?? "", allocationAssetOptions, current.baseCurrency)
+      );
     }
-  }, [editingProfileId, profileModalOpen, usableStrategies]);
+  }, [allocationAssetOptions, editingProfileId, profileModalOpen, usableStrategies]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -410,7 +476,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     setSuccessMessage("");
     setErrorMessage("");
     setEditingProfileId(null);
-    setFormState(createDefaultFormState(usableStrategies[0]?.id ?? ""));
+    setFormState(createDefaultFormState(usableStrategies[0]?.id ?? "", allocationAssetOptions));
     setProfileModalOpen(true);
   };
 
@@ -437,10 +503,25 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     [formState.allocationRows]
   );
 
-  const symbolSuggestions = useMemo(() => {
-    const fromProfiles = profiles.flatMap((profile) => Object.keys(profile.allocation));
-    return Array.from(new Set([...COMMON_ALLOCATION_SYMBOLS, ...fromProfiles])).sort((left, right) => left.localeCompare(right));
-  }, [profiles]);
+  const availableSymbolsByRow = useMemo(() => {
+    return formState.allocationRows.reduce<Record<string, string[]>>((map, row) => {
+      const currentSymbol = normalizeSymbol(row.symbol);
+      const selectedElsewhere = new Set(
+        formState.allocationRows
+          .filter((entry) => entry.id !== row.id)
+          .map((entry) => normalizeSymbol(entry.symbol))
+          .filter(Boolean)
+      );
+      const options = allocationAssetOptions.filter((symbol) => symbol === currentSymbol || !selectedElsewhere.has(symbol));
+      map[row.id] = currentSymbol && !options.includes(currentSymbol) ? [currentSymbol, ...options] : options;
+      return map;
+    }, {});
+  }, [allocationAssetOptions, formState.allocationRows]);
+
+  const remainingAllocationSymbols = useMemo(() => {
+    const selected = new Set(formState.allocationRows.map((row) => normalizeSymbol(row.symbol)).filter(Boolean));
+    return allocationAssetOptions.filter((symbol) => !selected.has(symbol));
+  }, [allocationAssetOptions, formState.allocationRows]);
 
   const submitProfileForm = (): void => {
     const name = formState.name.trim();
@@ -606,7 +687,33 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
         </div>
       ) : null}
 
-      {profiles.length === 0 && !loadingProfiles ? (
+      {loadingProfiles || loadingStrategies ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={`profile-skeleton-${index}`} className="rounded-xl border border-border bg-card p-4 animate-fade-up">
+                <Skeleton className="h-5 w-32" />
+                <Skeleton className="mt-2 h-4 w-40" />
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={`summary-skeleton-${index}`} className="rounded-lg border border-border bg-card p-4">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="mt-3 h-5 w-28" />
+                <Skeleton className="mt-2 h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : profiles.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card px-6 py-10 text-center animate-fade-scale-in">
           <div className="text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground">No Active Allocation</div>
           <h3 className="mt-3 text-lg font-mono font-semibold text-foreground">Create your first rebalance allocation</h3>
@@ -632,52 +739,70 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
               const selected = profile.id === selectedProfileId;
               const strategyName = getStrategyName(profile.strategyId, strategiesData?.strategies ?? []);
               const policyMeta = EXECUTION_POLICY_META[profile.executionPolicy];
+              const allocationEntries = getAllocationEntries(profile.allocation);
 
               return (
-                <button
+                <div
                   key={profile.id}
-                  type="button"
-                  onClick={() => setSelectedProfileId(profile.id)}
                   className={cn(
                     "rounded-xl border bg-card p-4 text-left transition-all duration-200 animate-fade-up",
                     selected ? "border-primary/40 shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]" : "border-border hover:border-primary/20 hover:bg-secondary/25"
                   )}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-mono font-semibold text-foreground">{profile.name}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{strategyName}</div>
+                  <button type="button" onClick={() => setSelectedProfileId(profile.id)} className="w-full text-left">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-mono font-semibold text-foreground">{profile.name}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{strategyName}</div>
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded px-2 py-1 text-[10px] font-mono uppercase tracking-wider",
+                          profile.isEnabled ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"
+                        )}
+                      >
+                        {profile.isEnabled ? "Enabled" : "Paused"}
+                      </span>
                     </div>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded px-2 py-1 text-[10px] font-mono uppercase tracking-wider",
-                        profile.isEnabled ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"
-                      )}
-                    >
-                      {profile.isEnabled ? "Enabled" : "Paused"}
-                    </span>
-                  </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-xs font-mono">
-                    <div>
-                      <div className="text-muted-foreground">Capital</div>
-                      <div className="mt-1 text-foreground">{formatUsd(profile.allocatedCapital)}</div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-xs font-mono">
+                      <div>
+                        <div className="text-muted-foreground">Capital</div>
+                        <div className="mt-1 text-foreground">{formatUsd(profile.allocatedCapital)}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Policy</div>
+                        <div className="mt-1 text-foreground">{policyMeta.label}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Last Exec</div>
+                        <div className="mt-1 text-foreground">{profile.lastExecutedAt ? formatDateTime(profile.lastExecutedAt) : "--"}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Next Run</div>
+                        <div className="mt-1 text-foreground">{profile.nextExecutionAt ? formatDateTime(profile.nextExecutionAt) : "--"}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-muted-foreground">Policy</div>
-                      <div className="mt-1 text-foreground">{policyMeta.label}</div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Last Exec</div>
-                      <div className="mt-1 text-foreground">{profile.lastExecutedAt ? formatDateTime(profile.lastExecutedAt) : "--"}</div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">Next Run</div>
-                      <div className="mt-1 text-foreground">{profile.nextExecutionAt ? formatDateTime(profile.nextExecutionAt) : "--"}</div>
-                    </div>
-                  </div>
 
-                  {profile.description ? <div className="mt-4 text-xs text-muted-foreground">{profile.description}</div> : null}
+                    {profile.description ? <div className="mt-4 text-xs text-muted-foreground">{profile.description}</div> : null}
+
+                    <div className="mt-4 rounded-lg border border-border bg-secondary/20 p-3">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Target Mix</div>
+                      <div className="mt-3 space-y-2">
+                        {allocationEntries.map(([symbol, percent]) => (
+                          <div key={`${profile.id}-${symbol}`} className="flex items-center justify-between gap-3 text-xs font-mono">
+                            <div className="min-w-0">
+                              <div className="truncate text-foreground">{symbol}</div>
+                              <div className="text-muted-foreground">{percent.toFixed(2)}%</div>
+                            </div>
+                            <div className="shrink-0 text-right text-foreground">
+                              {formatNotional((profile.allocatedCapital * percent) / 100, profile.baseCurrency)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </button>
 
                   {selected ? (
                     <div className="mt-4 flex flex-wrap gap-2">
@@ -705,7 +830,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                       </button>
                     </div>
                   ) : null}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -714,6 +839,38 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
       {selectedProfile ? (
         <>
+          {loadingState && !state ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={`selected-skeleton-${index}`} className="rounded-lg border border-border bg-card p-4">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="mt-3 h-5 w-28" />
+                    <Skeleton className="mt-2 h-4 w-20" />
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {Array.from({ length: 2 }).map((_, index) => (
+                  <div key={`chart-skeleton-${index}`} className="rounded-lg border border-border bg-card p-5">
+                    <Skeleton className="mx-auto h-4 w-36" />
+                    <Skeleton className="mx-auto mt-6 h-[280px] w-[280px] rounded-full" />
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg border border-border bg-card p-5">
+                <Skeleton className="h-4 w-32" />
+                <div className="mt-4 space-y-3">
+                  {Array.from({ length: 5 }).map((__, rowIndex) => (
+                    <Skeleton key={`table-skeleton-${rowIndex}`} className="h-10 w-full" />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {!loadingState || state ? (
+            <>
           {stateError ? (
             <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">
               {stateError instanceof Error ? stateError.message : "Failed to evaluate the selected allocation."}
@@ -786,11 +943,15 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                 </thead>
                 <tbody>
                   {loadingProfiles || loadingStrategies || loadingState ? (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                        Loading rebalance view...
-                      </td>
-                    </tr>
+                    Array.from({ length: 5 }).map((_, rowIndex) => (
+                      <tr key={`allocation-delta-skeleton-${rowIndex}`} className="border-b border-border last:border-b-0">
+                        {Array.from({ length: 5 }).map((__, cellIndex) => (
+                          <td key={`allocation-delta-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
+                            <Skeleton className={cn("h-4", cellIndex === 4 ? "ml-auto w-14" : "w-full")} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
                   ) : allocationRows.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
@@ -866,6 +1027,16 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                         <td className="px-4 py-3 text-right text-xs font-mono text-muted-foreground">{trade.reason}</td>
                       </tr>
                     ))
+                  ) : loadingProfiles || loadingStrategies || loadingState ? (
+                    Array.from({ length: 4 }).map((_, rowIndex) => (
+                      <tr key={`recommended-trades-skeleton-${rowIndex}`} className="border-b border-border last:border-b-0">
+                        {Array.from({ length: 6 }).map((__, cellIndex) => (
+                          <td key={`recommended-trades-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
+                            <Skeleton className={cn("h-4", cellIndex === 5 ? "ml-auto w-full" : "w-full")} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
                   ) : (
                     <tr>
                       <td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">
@@ -898,15 +1069,17 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
               <div>Next scheduled check: {formatDateTime(selectedProfile.nextExecutionAt)}</div>
             </div>
           </div>
+            </>
+          ) : null}
         </>
       ) : null}
 
       {profileModalOpen ? (
         <div className="fixed inset-0 z-[70] animate-overlay-fade" onClick={closeProfileModal}>
           <div className="absolute inset-0 bg-background/80 backdrop-blur-md" />
-          <div className="relative flex h-full w-full items-end justify-center p-0 sm:items-center sm:p-4 md:p-6">
+          <div className="relative flex min-h-full w-full items-start justify-center overflow-y-auto p-0 sm:items-center sm:p-4 md:p-6">
             <div
-              className="flex h-full w-full flex-col overflow-hidden rounded-none border border-border bg-[linear-gradient(180deg,_hsl(var(--card))_0%,_hsl(var(--secondary)/0.45)_100%)] shadow-2xl animate-fade-scale-in sm:h-auto sm:max-h-[calc(100vh-3rem)] sm:max-w-5xl sm:rounded-2xl"
+              className="flex min-h-full w-full flex-col overflow-hidden rounded-none border border-border bg-[linear-gradient(180deg,_hsl(var(--card))_0%,_hsl(var(--secondary)/0.45)_100%)] shadow-2xl animate-fade-scale-in sm:h-auto sm:min-h-0 sm:max-h-[calc(100vh-3rem)] sm:max-w-5xl sm:rounded-2xl"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-card/95 px-4 py-4 backdrop-blur sm:px-6">
@@ -930,12 +1103,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-
-              <datalist id="rebalance-allocation-symbols">
-                {symbolSuggestions.map((symbol) => (
-                  <option key={symbol} value={symbol} />
-                ))}
-              </datalist>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                 <div className="mx-auto w-full max-w-4xl space-y-5">
@@ -1070,7 +1237,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                       <div>
                         <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Target Allocation</div>
                         <div className="mt-1 text-sm text-muted-foreground">
-                          Set the asset percentages for this stored rebalance situation. Total must equal 100%.
+                          Choose from your current portfolio assets. Each asset can appear only once in this allocation, and the target worth updates from the capital and percentage.
                         </div>
                       </div>
                       <div className="text-right">
@@ -1083,24 +1250,37 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
                     <div className="mt-4 space-y-3">
                       {formState.allocationRows.map((row, index) => (
-                        <div key={row.id} className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_160px_auto]">
+                        <div key={row.id} className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_auto]">
                           <div>
                             <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Asset {index + 1}</label>
-                            <input
+                            <select
                               value={row.symbol}
                               onChange={(event) =>
                                 setFormState((current) => ({
                                   ...current,
                                   allocationRows: current.allocationRows.map((entry) =>
-                                    entry.id === row.id ? { ...entry, symbol: event.target.value.toUpperCase() } : entry
+                                    entry.id === row.id ? { ...entry, symbol: event.target.value } : entry
                                   ),
                                 }))
                               }
-                              list="rebalance-allocation-symbols"
-                              spellCheck={false}
                               className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono uppercase text-foreground outline-none"
-                              placeholder="BTC"
-                            />
+                            >
+                              <option value="">Select asset</option>
+                              {(availableSymbolsByRow[row.id] ?? []).map((symbol) => {
+                                const asset = portfolioAssetMap[symbol];
+                                const optionLabel = asset ? `${symbol} - held ${formatUsd(asset.value)}` : `${symbol} - base`;
+                                return (
+                                  <option key={symbol} value={symbol}>
+                                    {optionLabel}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {portfolioAssetMap[normalizeSymbol(row.symbol)]
+                                ? `Held now: ${formatUsd(portfolioAssetMap[normalizeSymbol(row.symbol)].value)}`
+                                : `Base asset: ${normalizeSymbol(row.symbol) || normalizeSymbol(formState.baseCurrency)}`}
+                            </div>
                           </div>
                           <div>
                             <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Percent</label>
@@ -1118,6 +1298,17 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                               placeholder="25"
                             />
                           </div>
+                          <div>
+                            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                              Worth ({normalizeSymbol(formState.baseCurrency)})
+                            </label>
+                            <div className="mt-1 flex h-[50px] items-center rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground">
+                              {formatNotional(
+                                (Number(formState.allocatedCapital) * Number(row.percent)) / 100,
+                                normalizeSymbol(formState.baseCurrency)
+                              )}
+                            </div>
+                          </div>
                           <div className="flex items-end">
                             <button
                               type="button"
@@ -1127,7 +1318,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                                   allocationRows:
                                     current.allocationRows.length > 1
                                       ? current.allocationRows.filter((entry) => entry.id !== row.id)
-                                      : [createDraftAllocationRow()],
+                                      : [createDraftAllocationRow(normalizeSymbol(current.baseCurrency), "100")],
                                 }))
                               }
                               className="inline-flex h-12 items-center justify-center rounded-md border border-border px-3 text-xs font-mono text-muted-foreground hover:text-foreground"
@@ -1145,15 +1336,23 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                         onClick={() =>
                           setFormState((current) => ({
                             ...current,
-                            allocationRows: [...current.allocationRows, createDraftAllocationRow()],
+                            allocationRows: [
+                              ...current.allocationRows,
+                              createDraftAllocationRow(remainingAllocationSymbols[0] ?? "", ""),
+                            ],
                           }))
                         }
+                        disabled={remainingAllocationSymbols.length === 0}
                         className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-mono text-foreground hover:bg-secondary"
                       >
                         <Plus className="h-3.5 w-3.5" />
                         Add Asset
                       </button>
-                      <div className="text-xs text-muted-foreground">Examples: BTC 40, ETH 25, SOL 15, USDC 20</div>
+                      <div className="text-xs text-muted-foreground">
+                        {remainingAllocationSymbols.length === 0
+                          ? "All available assets are already used in this allocation."
+                          : "Each selected asset is locked to one row until removed."}
+                      </div>
                     </div>
                   </div>
                 </div>

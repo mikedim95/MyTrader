@@ -9,6 +9,7 @@ import { MinerTable } from "@/components/miners/MinerTable";
 import { MinerDetailPanel } from "@/components/miners/MinerDetailPanel";
 import { AddMinerDialog } from "@/components/miners/AddMinerDialog";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/sonner";
 import type { FleetHistoryScope, MinerVerificationResult } from "@/types/api";
 
@@ -150,7 +151,7 @@ export function AsicMinersPage() {
         </div>
       </div>
 
-      <FleetOverviewCards overview={overviewData?.overview} />
+      <FleetOverviewCards overview={overviewData?.overview} isLoading={loadingOverview && !overviewData?.overview} />
 
       {fleetError ? (
         <div className="rounded-lg border border-negative/40 bg-negative/10 p-4 text-sm text-negative animate-fade-up">
@@ -172,9 +173,13 @@ export function AsicMinersPage() {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Fleet Dashboard</div>
-            <div className="mt-1 text-sm font-mono text-foreground">
+            {isLoading ? (
+              <Skeleton className="mt-2 h-5 w-32" />
+            ) : (
+              <div className="mt-1 text-sm font-mono text-foreground">
               {miners.length} miners | {fleetLive.filter((miner) => miner.online).length} online
-            </div>
+              </div>
+            )}
           </div>
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
         </div>
@@ -182,6 +187,7 @@ export function AsicMinersPage() {
         <MinerTable
           miners={miners}
           fleetLive={fleetLive}
+          isLoading={isLoading}
           onOpen={setSelectedMinerId}
           onVerify={(minerId) => verifyStoredMinerMutation.mutate(minerId)}
           onCommand={(minerId, action) => commandMutation.mutate({ minerId, action })}

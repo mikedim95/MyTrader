@@ -1,8 +1,10 @@
 import { Activity, Cpu, Flame, Gauge, Power } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { FleetOverview } from "@/types/api";
 
 interface FleetOverviewCardsProps {
   overview?: FleetOverview;
+  isLoading?: boolean;
 }
 
 function formatValue(value: number | null | undefined, suffix = ""): string {
@@ -10,7 +12,7 @@ function formatValue(value: number | null | undefined, suffix = ""): string {
   return `${value.toFixed(1)}${suffix}`;
 }
 
-export function FleetOverviewCards({ overview }: FleetOverviewCardsProps) {
+export function FleetOverviewCards({ overview, isLoading = false }: FleetOverviewCardsProps) {
   const cards = [
     {
       label: "Miners Online",
@@ -60,8 +62,17 @@ export function FleetOverviewCards({ overview }: FleetOverviewCardsProps) {
             <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">{card.label}</span>
             <card.icon className={`h-4 w-4 ${card.tone} transition-transform duration-300 group-hover:scale-110`} />
           </div>
-          <div className={`text-lg md:text-xl font-mono font-semibold ${card.tone}`}>{card.value}</div>
-          <div className="mt-1 text-xs font-mono text-muted-foreground">{card.sub}</div>
+          {isLoading ? (
+            <>
+              <Skeleton className="h-6 w-24" />
+              <Skeleton className="mt-2 h-4 w-28" />
+            </>
+          ) : (
+            <>
+              <div className={`text-lg md:text-xl font-mono font-semibold ${card.tone}`}>{card.value}</div>
+              <div className="mt-1 text-xs font-mono text-muted-foreground">{card.sub}</div>
+            </>
+          )}
         </div>
       ))}
     </div>
