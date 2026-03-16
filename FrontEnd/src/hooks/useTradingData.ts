@@ -12,6 +12,24 @@ export function useDashboardData(accountType: PortfolioAccountType = "real") {
   });
 }
 
+export function useTradingPairPreview(
+  baseSymbol: string | undefined,
+  quoteSymbol: string | undefined,
+  accountType: PortfolioAccountType = "real"
+) {
+  const base = baseSymbol?.trim().toUpperCase();
+  const quote = quoteSymbol?.trim().toUpperCase();
+
+  return useQuery({
+    queryKey: ["trading-pair-preview", base, quote, accountType],
+    queryFn: () => backendApi.getTradingPairPreview(base ?? "", quote ?? "", accountType),
+    enabled: Boolean(base) && Boolean(quote) && base !== quote,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
 export function useOrdersData() {
   return useQuery({
     queryKey: ["orders"],

@@ -34,8 +34,13 @@ const SCOPE_OPTIONS: Array<{ value: FleetHistoryScope; label: string }> = [
 
 type ChartMetricKey = "totalRateThs" | "maxTemp";
 
+function isFiniteMetricValue(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function formatAxisTime(value: string, scope: FleetHistoryScope): string {
   const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "--";
   if (scope === "hour" || scope === "day") {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
@@ -43,12 +48,13 @@ function formatAxisTime(value: string, scope: FleetHistoryScope): string {
 }
 
 function formatTooltipTime(value: string): string {
-  return new Date(value).toLocaleString();
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString() : "--";
 }
 
 function getSeriesMeta(history: FleetHistorySeries[], metric: ChartMetricKey) {
   return history
-    .filter((series) => series.points.some((point) => typeof point[metric] === "number"))
+    .filter((series) => series.points.some((point) => isFiniteMetricValue(point[metric])))
     .map((series, index) => ({
       key: `miner_${series.minerId}`,
       label: `${series.minerName} (${series.minerIp})`,
@@ -61,9 +67,13 @@ function buildChartRows(history: FleetHistorySeries[], metric: ChartMetricKey) {
   for (const series of history) {
     const key = `miner_${series.minerId}`;
     for (const point of series.points) {
+      const timestamp = String(point.timestamp);
+      const parsedTime = new Date(timestamp).getTime();
+      if (!Number.isFinite(parsedTime)) continue;
+
       const row = rows.get(point.timestamp) ?? { timestamp: point.timestamp };
-      row[key] = typeof point[metric] === "number" ? point[metric] : null;
-      rows.set(point.timestamp, row);
+      row[key] = isFiniteMetricValue(point[metric]) ? point[metric] : null;
+      rows.set(timestamp, row);
     }
   }
   return Array.from(rows.values()).sort((left, right) => {
@@ -74,7 +84,7 @@ function buildChartRows(history: FleetHistorySeries[], metric: ChartMetricKey) {
 }
 
 function getDefaultBrushWindow(scope: FleetHistoryScope, rowCount: number) {
-  const sizeByScope: Record<FleetHistoryScope, number> = { hour: 30, day: 32, week: 28, month: 24 };
+  const sizeByScope: Record<FleetHistoryScope, number> = { hour: 60, day: 96, week: 168, month: 120 };
   const desiredSize = sizeByScope[scope];
   const startIndex = Math.max(0, rowCount - desiredSize);
   const endIndex = Math.max(0, rowCount - 1);
@@ -108,6 +118,10 @@ function ChartCard({
   const rows = useMemo(() => buildChartRows(history, metric), [history, metric]);
   const hasData = rows.length > 0 && seriesMeta.length > 0;
   const [brushWindow, setBrushWindow] = useState(() => getDefaultBrushWindow(scope, rows.length));
+  const safeBrushWindow = useMemo(
+    () => normalizeBrushWindow(brushWindow, getDefaultBrushWindow(scope, rows.length), rows.length),
+    [brushWindow, rows.length, scope]
+  );
 
   useEffect(() => {
     setBrushWindow(getDefaultBrushWindow(scope, rows.length));
@@ -174,8 +188,8 @@ function ChartCard({
             {rows.length > 1 ? (
               <Brush
                 dataKey="timestamp"
-                startIndex={brushWindow.startIndex}
-                endIndex={brushWindow.endIndex}
+                startIndex={safeBrushWindow.startIndex}
+                endIndex={safeBrushWindow.endIndex}
                 onChange={(next) => setBrushWindow((previous) => normalizeBrushWindow(next, previous, rows.length))}
                 height={26}
                 travellerWidth={10}

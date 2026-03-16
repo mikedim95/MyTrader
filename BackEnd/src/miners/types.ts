@@ -238,6 +238,15 @@ export interface FleetHistorySeries {
   points: FleetHistoryPoint[];
 }
 
+export interface FleetHistoryBucketRecord extends RowDataPacket {
+  bucket_index: number;
+  online: number | boolean;
+  avg_total_rate_ths: number | null;
+  avg_power_watts: number | null;
+  max_board_temp: number | null;
+  max_hotspot_temp: number | null;
+}
+
 export interface MinerCreateInput {
   name: string;
   ip: string;

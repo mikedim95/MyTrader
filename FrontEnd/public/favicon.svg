@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#131722" />
+      <stop offset="1" stop-color="#090C14" />
+    </linearGradient>
+    <linearGradient id="ring" x1="18" y1="16" x2="46" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15F5CC" />
+      <stop offset="1" stop-color="#4D6BFF" />
+    </linearGradient>
+    <linearGradient id="needle" x1="25" y1="21" x2="42" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15F5CC" />
+      <stop offset="1" stop-color="#FF3C82" />
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="16" fill="url(#bg)" />
+  <path d="M32 14C22.059 14 14 22.059 14 32C14 41.941 22.059 50 32 50C41.941 50 50 41.941 50 32" stroke="url(#ring)" stroke-width="4" stroke-linecap="round" />
+  <circle cx="32" cy="32" r="4" fill="#E8F2FF" />
+  <path d="M29.5 34.5L23 22.5L41.5 29L34.5 41L29.5 34.5Z" fill="url(#needle)" />
+  <path d="M23 22.5L32 32" stroke="#E8F2FF" stroke-width="2" stroke-linecap="round" />
+  <path d="M18 45H24" stroke="#15F5CC" stroke-width="3" stroke-linecap="round" />
+  <path d="M18 39H28" stroke="#4D6BFF" stroke-width="3" stroke-linecap="round" />
+  <path d="M18 51H30" stroke="#FF3C82" stroke-width="3" stroke-linecap="round" />
+</svg>

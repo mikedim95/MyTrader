@@ -47,6 +47,11 @@ interface BinanceTicker24hResponse {
   quoteVolume: string;
 }
 
+interface BinanceTickerPriceResponse {
+  symbol: string;
+  price: string;
+}
+
 type BinanceKline = [
   number,
   string,
@@ -83,6 +88,15 @@ interface AssetSnapshot {
   asset: Asset;
   previousValue: number;
 }
+
+interface AssetUsdSnapshot {
+  price: number;
+  change24h: number;
+  volume24h: number;
+  referenceQuote: string;
+}
+
+const USD_REFERENCE_QUOTES = ["USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI"] as const;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -184,6 +198,131 @@ export async function getTickerSnapshot(
     price: toNumber(ticker.lastPrice),
     change24h: toNumber(ticker.priceChangePercent),
     volume24h: toNumber(ticker.quoteVolume),
+  };
+}
+
+export async function getAssetUsdSnapshot(
+  symbol: string,
+  credentials: BinanceCredentials | null
+): Promise<AssetUsdSnapshot> {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  if (STABLE_COINS.has(normalizedSymbol)) {
+    return { price: 1, change24h: 0, volume24h: 0, referenceQuote: normalizedSymbol };
+  }
+
+  for (const quoteSymbol of USD_REFERENCE_QUOTES) {
+    if (quoteSymbol === normalizedSymbol) {
+      continue;
+    }
+
+    try {
+      const ticker = await publicGet<BinanceTicker24hResponse>(
+        "/api/v3/ticker/24hr",
+        { symbol: `${normalizedSymbol}${quoteSymbol}` },
+        credentials
+      );
+
+      return {
+        price: toNumber(ticker.lastPrice),
+        change24h: toNumber(ticker.priceChangePercent),
+        volume24h: toNumber(ticker.quoteVolume),
+        referenceQuote: quoteSymbol,
+      };
+    } catch {
+      // Continue trying the next stable quote.
+    }
+  }
+
+  throw new Error(`No USD reference market found for ${normalizedSymbol}.`);
+}
+
+export async function getTradingPairSnapshot(
+  baseSymbol: string,
+  quoteSymbol: string,
+  credentials: BinanceCredentials | null
+): Promise<{
+  base: AssetUsdSnapshot;
+  quote: AssetUsdSnapshot;
+  priceInQuote: number;
+  inversePrice: number;
+  pricingSource: "direct" | "inverse" | "usd_cross";
+}> {
+  const normalizedBase = baseSymbol.trim().toUpperCase();
+  const normalizedQuote = quoteSymbol.trim().toUpperCase();
+
+  if (!normalizedBase || !normalizedQuote) {
+    throw new Error("Both base and quote assets are required.");
+  }
+
+  const [base, quote] = await Promise.all([
+    getAssetUsdSnapshot(normalizedBase, credentials),
+    getAssetUsdSnapshot(normalizedQuote, credentials),
+  ]);
+
+  if (normalizedBase === normalizedQuote) {
+    return {
+      base,
+      quote,
+      priceInQuote: 1,
+      inversePrice: 1,
+      pricingSource: "usd_cross",
+    };
+  }
+
+  try {
+    const directTicker = await publicGet<BinanceTickerPriceResponse>(
+      "/api/v3/ticker/price",
+      { symbol: `${normalizedBase}${normalizedQuote}` },
+      credentials
+    );
+    const directPrice = toNumber(directTicker.price);
+
+    if (directPrice > 0) {
+      return {
+        base,
+        quote,
+        priceInQuote: directPrice,
+        inversePrice: 1 / directPrice,
+        pricingSource: "direct",
+      };
+    }
+  } catch {
+    // Fall back to the reverse or USD cross pricing.
+  }
+
+  try {
+    const inverseTicker = await publicGet<BinanceTickerPriceResponse>(
+      "/api/v3/ticker/price",
+      { symbol: `${normalizedQuote}${normalizedBase}` },
+      credentials
+    );
+    const inverseRawPrice = toNumber(inverseTicker.price);
+
+    if (inverseRawPrice > 0) {
+      return {
+        base,
+        quote,
+        priceInQuote: 1 / inverseRawPrice,
+        inversePrice: inverseRawPrice,
+        pricingSource: "inverse",
+      };
+    }
+  } catch {
+    // Fall back to USD cross pricing.
+  }
+
+  if (quote.price <= 0) {
+    throw new Error(`Unable to price ${normalizedBase}/${normalizedQuote}.`);
+  }
+
+  const crossPrice = base.price / quote.price;
+  return {
+    base,
+    quote,
+    priceInQuote: crossPrice,
+    inversePrice: crossPrice > 0 ? 1 / crossPrice : 0,
+    pricingSource: "usd_cross",
   };
 }
 

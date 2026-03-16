@@ -35,6 +35,7 @@ import type {
   StrategyRunResponse,
   StrategyRunsResponse,
   StrategyStateResponse,
+  TradingPairPreviewResponse,
   StrategyValidationResponse,
   VerifyMinerDraftResponse,
 } from "@/types/api";
@@ -160,6 +161,8 @@ export const backendApi = {
     }),
   getDashboard: (accountType: PortfolioAccountType = "real") =>
     apiRequest<DashboardResponse>(withQuery("/api/dashboard", { accountType })),
+  getTradingPairPreview: (base: string, quote: string, accountType: PortfolioAccountType = "real") =>
+    apiRequest<TradingPairPreviewResponse>(withQuery("/api/trading/pair-preview", { base, quote, accountType })),
   getOrders: () => apiRequest<OrdersResponse>("/api/orders"),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),
   getNicehashOverview: () => apiRequest<NicehashOverviewResponse>("/api/mining/nicehash"),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
+import { SettingsModal } from "@/components/SettingsModal";
 import { TopBar } from "@/components/TopBar";
 import { ProfileModal } from "@/components/ProfileModal";
 import { ComingSoonPage } from "@/components/ComingSoonPage";
@@ -9,7 +10,6 @@ import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { NicehashPage } from "@/pages/NicehashPage";
-import { SettingsPage } from "@/pages/SettingsPage";
 import type { AppSession, PortfolioAccountType } from "@/types/api";
 
 const inactivePageMeta: Record<string, { title: string; description: string }> = {
@@ -36,6 +36,7 @@ const Index = ({ session, onLogout }: IndexProps) => {
   const [currentPage, setCurrentPage] = useState("portfolio");
   const [accountType, setAccountType] = useState<PortfolioAccountType>("demo");
   const [profileOpen, setProfileOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -51,8 +52,6 @@ const Index = ({ session, onLogout }: IndexProps) => {
         return <AsicMinersPage />;
       case "nicehash":
         return <NicehashPage />;
-      case "settings":
-        return <SettingsPage />;
       default: {
         const inactive = inactivePageMeta[currentPage];
         return (
@@ -87,8 +86,9 @@ const Index = ({ session, onLogout }: IndexProps) => {
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
         onLogout={onLogout}
-        onNavigate={setCurrentPage}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 };

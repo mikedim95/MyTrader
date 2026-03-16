@@ -1,13 +1,12 @@
 import { X, LogOut, Settings, User, Shield } from "lucide-react";
 import type { AppSession } from "@/types/api";
-import { cn } from "@/lib/utils";
 
 interface ProfileModalProps {
   session: AppSession;
   open: boolean;
   onClose: () => void;
   onLogout: () => void;
-  onNavigate: (page: string) => void;
+  onOpenSettings: () => void;
 }
 
 function getUserInitials(username: string): string {
@@ -19,7 +18,7 @@ function getUserInitials(username: string): string {
     .join("") || "U";
 }
 
-export function ProfileModal({ session, open, onClose, onLogout, onNavigate }: ProfileModalProps) {
+export function ProfileModal({ session, open, onClose, onLogout, onOpenSettings }: ProfileModalProps) {
   if (!open) return null;
 
   return (
@@ -55,7 +54,10 @@ export function ProfileModal({ session, open, onClose, onLogout, onNavigate }: P
           {/* Actions */}
           <div className="p-3 space-y-1">
             <button
-              onClick={() => { onNavigate("settings"); onClose(); }}
+              onClick={() => {
+                onOpenSettings();
+                onClose();
+              }}
               className="w-full flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-mono text-foreground transition hover:bg-secondary/60"
             >
               <Settings className="h-4 w-4 text-muted-foreground" />

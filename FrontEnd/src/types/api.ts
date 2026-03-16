@@ -291,6 +291,28 @@ export interface DashboardResponse {
   generatedAt: string;
 }
 
+export interface TradingPairPreview {
+  baseSymbol: string;
+  baseName: string;
+  quoteSymbol: string;
+  quoteName: string;
+  basePriceUsd: number;
+  quotePriceUsd: number;
+  priceInQuote: number;
+  inversePrice: number;
+  baseChange24h: number;
+  quoteChange24h: number;
+  baseBalance: number;
+  quoteBalance: number;
+  pricingSource: "direct" | "inverse" | "usd_cross";
+}
+
+export interface TradingPairPreviewResponse {
+  accountType: PortfolioAccountType;
+  pair: TradingPairPreview;
+  generatedAt: string;
+}
+
 export interface OrdersResponse {
   connection: ConnectionStatus;
   orders: Order[];

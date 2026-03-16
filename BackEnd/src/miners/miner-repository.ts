@@ -2,6 +2,8 @@ import type { PoolConnection } from "mysql2/promise";
 import pool from "../db.js";
 import { minerSchemaStatements } from "./miner-schema.js";
 import {
+  FleetHistoryBucketRecord,
+  FleetHistoryPoint,
   MinerCommandEntity,
   MinerCommandLogInput,
   MinerCommandRecord,
@@ -335,6 +337,77 @@ export class MinerRepository {
       [minerId, toMysqlDateTime(sinceIso)]
     );
     return rows.map(mapSnapshotRecord);
+  }
+
+  async listHistoryBucketsSince(minerId: number, sinceIso: string, bucketSeconds: number): Promise<FleetHistoryPoint[]> {
+    await this.init();
+
+    const safeBucketSeconds = Number.isInteger(bucketSeconds) && bucketSeconds > 0 ? bucketSeconds : 60;
+    const [rows] = await pool.query<FleetHistoryBucketRecord[]>(
+      `
+        SELECT
+          FLOOR(UNIX_TIMESTAMP(created_at) / ?) AS bucket_index,
+          MAX(CASE WHEN online = 1 THEN 1 ELSE 0 END) AS online,
+          AVG(CASE WHEN total_rate_ths IS NOT NULL THEN total_rate_ths END) AS avg_total_rate_ths,
+          AVG(CASE WHEN power_watts > 0 THEN power_watts END) AS avg_power_watts,
+          NULLIF(
+            MAX(
+              GREATEST(
+                IF(board_temp_1 > 0 AND board_temp_1 <= 150, board_temp_1, -1),
+                IF(board_temp_2 > 0 AND board_temp_2 <= 150, board_temp_2, -1),
+                IF(board_temp_3 > 0 AND board_temp_3 <= 150, board_temp_3, -1)
+              )
+            ),
+            -1
+          ) AS max_board_temp,
+          NULLIF(
+            MAX(
+              GREATEST(
+                IF(hotspot_temp_1 > 0 AND hotspot_temp_1 <= 150, hotspot_temp_1, -1),
+                IF(hotspot_temp_2 > 0 AND hotspot_temp_2 <= 150, hotspot_temp_2, -1),
+                IF(hotspot_temp_3 > 0 AND hotspot_temp_3 <= 150, hotspot_temp_3, -1)
+              )
+            ),
+            -1
+          ) AS max_hotspot_temp
+        FROM miner_status_snapshots
+        WHERE miner_id = ?
+          AND created_at >= ?
+        GROUP BY bucket_index
+        ORDER BY bucket_index ASC
+      `,
+      [safeBucketSeconds, minerId, toMysqlDateTime(sinceIso)]
+    );
+
+    return rows
+      .map((row) => {
+        const bucketIndex = Number(row.bucket_index);
+        if (!Number.isFinite(bucketIndex)) return null;
+
+        const totalRateThs =
+          typeof row.avg_total_rate_ths === "number" && Number.isFinite(row.avg_total_rate_ths)
+            ? Number(row.avg_total_rate_ths.toFixed(2))
+            : null;
+        const powerWatts =
+          typeof row.avg_power_watts === "number" && Number.isFinite(row.avg_power_watts)
+            ? Math.round(row.avg_power_watts)
+            : null;
+        const maxBoardTemp =
+          typeof row.max_board_temp === "number" && Number.isFinite(row.max_board_temp) ? row.max_board_temp : null;
+        const maxHotspotTemp =
+          typeof row.max_hotspot_temp === "number" && Number.isFinite(row.max_hotspot_temp) ? row.max_hotspot_temp : null;
+
+        return {
+          timestamp: new Date(bucketIndex * safeBucketSeconds * 1000).toISOString(),
+          online: row.online === true || row.online === 1,
+          totalRateThs,
+          maxBoardTemp,
+          maxHotspotTemp,
+          maxTemp: maxHotspotTemp ?? maxBoardTemp,
+          powerWatts,
+        } satisfies FleetHistoryPoint;
+      })
+      .filter((point): point is FleetHistoryPoint => point !== null);
   }
 
   async replacePools(minerId: number, pools: MinerPoolPersistInput[]): Promise<MinerPoolEntity[]> {

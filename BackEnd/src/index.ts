@@ -3,6 +3,7 @@ import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import {
   clearUserCredentials,
+  getActiveCredentials,
   getConnectionStatus,
   storeUserCredentials,
   validateCredentials,
@@ -26,6 +27,7 @@ import { MinerRepository as FleetMinerRepository } from "./miners/miner-reposito
 import { MinerVerifyService } from "./miners/miner-verify-service.js";
 import {
   generateRecentDayLabels,
+  getTradingPairSnapshot,
   getDailyCloseSeries,
   getDashboardData,
   getHourlyCloseSeries,
@@ -35,7 +37,7 @@ import {
 } from "./portfolioService.js";
 import type { DashboardResponse } from "./types.js";
 import { BacktestEngine } from "./strategy/backtest-engine.js";
-import { getDemoPortfolioState } from "./strategy/portfolio-state-service.js";
+import { getDemoPortfolioState, getPortfolioState } from "./strategy/portfolio-state-service.js";
 import { StrategyRepository } from "./strategy/strategy-repository.js";
 import { StrategyRunner } from "./strategy/strategy-runner.js";
 import { StrategyScheduler } from "./strategy/strategy-scheduler.js";
@@ -81,6 +83,14 @@ function parseDashboardAccountType(req: Request): "real" | "demo" {
 
 function parseTextField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseTradingSymbol(value: unknown): string {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
+function isValidTradingSymbol(symbol: string): boolean {
+  return /^[A-Z0-9_-]{2,20}$/.test(symbol);
 }
 
 function requireUserScope(req: Request, res: Response): StrategyUserScope | null {
@@ -323,6 +333,60 @@ app.get("/api/dashboard", async (req, res) => {
 
   const dashboard = await getDashboardData(userScope);
   res.json(dashboard);
+});
+
+app.get("/api/trading/pair-preview", async (req, res) => {
+  const accountType = parseDashboardAccountType(req);
+  const userScope = resolveStrategyUserScope(req);
+  const baseSymbol = parseTradingSymbol(req.query.base);
+  const quoteSymbol = parseTradingSymbol(req.query.quote);
+
+  if (!isValidTradingSymbol(baseSymbol) || !isValidTradingSymbol(quoteSymbol)) {
+    res.status(400).json({ message: "Both base and quote assets are required." });
+    return;
+  }
+
+  if (baseSymbol === quoteSymbol) {
+    res.status(400).json({ message: "Base and quote assets must be different." });
+    return;
+  }
+
+  try {
+    const demoAccount = accountType === "demo" ? await resolveDemoAccountSettings(userScope) : undefined;
+    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount, userScope });
+    const { credentials } = await getActiveCredentials(userScope);
+    const pairSnapshot = await getTradingPairSnapshot(baseSymbol, quoteSymbol, credentials);
+    const balanceBySymbol = new Map(
+      portfolio.assets.map((asset) => [
+        asset.symbol.toUpperCase(),
+        asset.quantity,
+      ])
+    );
+
+    res.json({
+      accountType,
+      pair: {
+        baseSymbol,
+        baseName: getNameForSymbol(baseSymbol),
+        quoteSymbol,
+        quoteName: getNameForSymbol(quoteSymbol),
+        basePriceUsd: round(pairSnapshot.base.price, 8),
+        quotePriceUsd: round(pairSnapshot.quote.price, 8),
+        priceInQuote: round(pairSnapshot.priceInQuote, 8),
+        inversePrice: round(pairSnapshot.inversePrice, 8),
+        baseChange24h: round(pairSnapshot.base.change24h, 4),
+        quoteChange24h: round(pairSnapshot.quote.change24h, 4),
+        baseBalance: round(balanceBySymbol.get(baseSymbol) ?? 0, 10),
+        quoteBalance: round(balanceBySymbol.get(quoteSymbol) ?? 0, 10),
+        pricingSource: pairSnapshot.pricingSource,
+      },
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Unable to load trading pair preview.",
+    });
+  }
 });
 
 app.get("/api/orders", async (req, res) => {

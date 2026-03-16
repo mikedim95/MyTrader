@@ -94,12 +94,6 @@ interface MinerApiDeps {
   pollingService: MinerPollingService;
 }
 
-function bucketTimestamp(timestamp: string, bucketMs: number): string {
-  const time = new Date(timestamp).getTime();
-  const bucketStart = Math.floor(time / bucketMs) * bucketMs;
-  return new Date(bucketStart).toISOString();
-}
-
 export function createMinerRouter(deps: MinerApiDeps): Router {
   const router = Router();
 
@@ -535,72 +529,11 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
       const miners = await deps.repository.listMiners();
       const history = await Promise.all(
         miners.map(async (miner) => {
-          const snapshots = await deps.repository.listHistorySince(miner.id, sinceIso);
-          const buckets = new Map<
-            string,
-            {
-              timestamp: string;
-              onlineCount: number;
-              count: number;
-              totalRateSum: number;
-              totalRateCount: number;
-              powerSum: number;
-              powerCount: number;
-              maxBoardTemp: number | null;
-              maxHotspotTemp: number | null;
-            }
-          >();
-
-          for (const snapshot of snapshots) {
-            const key = bucketTimestamp(snapshot.createdAt, scopeConfig.bucketMs);
-            const boardTemps = snapshot.boardTemps.filter(isValidTemperature);
-            const hotspotTemps = snapshot.hotspotTemps.filter(isValidTemperature);
-            const currentBoardMax = boardTemps.length > 0 ? Math.max(...boardTemps) : null;
-            const currentHotspotMax = hotspotTemps.length > 0 ? Math.max(...hotspotTemps) : null;
-
-            const bucket = buckets.get(key) ?? {
-              timestamp: key,
-              onlineCount: 0,
-              count: 0,
-              totalRateSum: 0,
-              totalRateCount: 0,
-              powerSum: 0,
-              powerCount: 0,
-              maxBoardTemp: null,
-              maxHotspotTemp: null,
-            };
-
-            bucket.count += 1;
-            if (snapshot.online) bucket.onlineCount += 1;
-            if (typeof snapshot.totalRateThs === "number") {
-              bucket.totalRateSum += snapshot.totalRateThs;
-              bucket.totalRateCount += 1;
-            }
-            if (typeof snapshot.powerWatts === "number" && snapshot.powerWatts > 0) {
-              bucket.powerSum += snapshot.powerWatts;
-              bucket.powerCount += 1;
-            }
-            if (typeof currentBoardMax === "number") {
-              bucket.maxBoardTemp = bucket.maxBoardTemp === null ? currentBoardMax : Math.max(bucket.maxBoardTemp, currentBoardMax);
-            }
-            if (typeof currentHotspotMax === "number") {
-              bucket.maxHotspotTemp = bucket.maxHotspotTemp === null ? currentHotspotMax : Math.max(bucket.maxHotspotTemp, currentHotspotMax);
-            }
-
-            buckets.set(key, bucket);
-          }
-
-          const points = Array.from(buckets.values())
-            .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime())
-            .map((bucket) => ({
-              timestamp: bucket.timestamp,
-              online: bucket.onlineCount > 0,
-              totalRateThs: bucket.totalRateCount > 0 ? Number((bucket.totalRateSum / bucket.totalRateCount).toFixed(2)) : null,
-              maxBoardTemp: bucket.maxBoardTemp,
-              maxHotspotTemp: bucket.maxHotspotTemp,
-              maxTemp: bucket.maxHotspotTemp ?? bucket.maxBoardTemp,
-              powerWatts: bucket.powerCount > 0 ? Math.round(bucket.powerSum / bucket.powerCount) : null,
-            }));
+          const points = await deps.repository.listHistoryBucketsSince(
+            miner.id,
+            sinceIso,
+            Math.max(60, Math.round(scopeConfig.bucketMs / 1000))
+          );
 
           return {
             minerId: miner.id,
