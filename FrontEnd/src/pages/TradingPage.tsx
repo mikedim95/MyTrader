@@ -104,6 +104,15 @@ function pricingSourceLabel(source: "direct" | "inverse" | "usd_cross" | undefin
   return "--";
 }
 
+function pickAlternateSymbol(
+  currentSymbol: string,
+  excludedSymbol: string,
+  orderedOptions: string[],
+  fallback = "USDT"
+): string {
+  return orderedOptions.find((symbol) => symbol !== currentSymbol && symbol !== excludedSymbol) ?? fallback;
+}
+
 export function TradingPage({ accountType }: TradingPageProps) {
   const { data, isPending, error } = useDashboardData(accountType);
   const isLoading = isPending && !data;
@@ -121,6 +130,21 @@ export function TradingPage({ accountType }: TradingPageProps) {
       left.localeCompare(right)
     );
   }, [assets]);
+
+  const normalizedBaseSymbol = useMemo(() => normalizeSymbolInput(baseSymbolInput), [baseSymbolInput]);
+  const normalizedQuoteSymbol = useMemo(() => normalizeSymbolInput(quoteSymbolInput), [quoteSymbolInput]);
+  const deferredBaseSymbol = useDeferredValue(normalizedBaseSymbol);
+  const deferredQuoteSymbol = useDeferredValue(normalizedQuoteSymbol);
+
+  const baseOptions = useMemo(
+    () => symbolSuggestions.filter((symbol) => symbol !== normalizedQuoteSymbol || symbol === normalizedBaseSymbol),
+    [normalizedBaseSymbol, normalizedQuoteSymbol, symbolSuggestions]
+  );
+
+  const quoteOptions = useMemo(
+    () => symbolSuggestions.filter((symbol) => symbol !== normalizedBaseSymbol || symbol === normalizedQuoteSymbol),
+    [normalizedBaseSymbol, normalizedQuoteSymbol, symbolSuggestions]
+  );
 
   useEffect(() => {
     if (baseSymbolInput) {
@@ -144,10 +168,16 @@ export function TradingPage({ accountType }: TradingPageProps) {
     setQuoteSymbolInput(preferredQuote);
   }, [baseSymbolInput, quoteSymbolInput, symbolSuggestions]);
 
-  const normalizedBaseSymbol = useMemo(() => normalizeSymbolInput(baseSymbolInput), [baseSymbolInput]);
-  const normalizedQuoteSymbol = useMemo(() => normalizeSymbolInput(quoteSymbolInput), [quoteSymbolInput]);
-  const deferredBaseSymbol = useDeferredValue(normalizedBaseSymbol);
-  const deferredQuoteSymbol = useDeferredValue(normalizedQuoteSymbol);
+  useEffect(() => {
+    if (!normalizedBaseSymbol || !normalizedQuoteSymbol || normalizedBaseSymbol !== normalizedQuoteSymbol) {
+      return;
+    }
+
+    const nextQuote = pickAlternateSymbol(normalizedQuoteSymbol, normalizedBaseSymbol, [...QUOTE_PRIORITY, ...symbolSuggestions]);
+    if (nextQuote !== normalizedQuoteSymbol) {
+      setQuoteSymbolInput(nextQuote);
+    }
+  }, [normalizedBaseSymbol, normalizedQuoteSymbol, symbolSuggestions]);
 
   const invalidPairMessage = useMemo(() => {
     if (!normalizedBaseSymbol || !normalizedQuoteSymbol) {
@@ -253,12 +283,6 @@ export function TradingPage({ accountType }: TradingPageProps) {
         <p className="text-sm text-muted-foreground mt-1">Flexible pair preview for spot trades across base, quote, or USD sizing.</p>
       </div>
 
-      <datalist id="trade-symbol-suggestions">
-        {symbolSuggestions.map((symbol) => (
-          <option key={symbol} value={symbol} />
-        ))}
-      </datalist>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 rounded-lg border border-border bg-card p-5 space-y-4 animate-fade-up">
           <div className="flex gap-2">
@@ -283,21 +307,33 @@ export function TradingPage({ accountType }: TradingPageProps) {
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-3 items-end">
             <div>
               <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Base Asset</label>
-              <input
+              <select
                 value={baseSymbolInput}
-                onChange={(event) => setBaseSymbolInput(event.target.value)}
-                list="trade-symbol-suggestions"
-                spellCheck={false}
-                placeholder="BTC"
+                onChange={(event) => {
+                  const nextBase = event.target.value;
+                  setBaseSymbolInput(nextBase);
+                  if (nextBase === normalizedQuoteSymbol) {
+                    setQuoteSymbolInput(pickAlternateSymbol(normalizedQuoteSymbol, nextBase, [...QUOTE_PRIORITY, ...symbolSuggestions]));
+                  }
+                }}
                 className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono uppercase text-foreground outline-none"
-              />
+              >
+                {baseOptions.map((symbol) => (
+                  <option key={symbol} value={symbol}>
+                    {symbol}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <button
               type="button"
               onClick={() => {
-                setBaseSymbolInput(quoteSymbolInput);
-                setQuoteSymbolInput(baseSymbolInput);
+                if (!normalizedBaseSymbol || !normalizedQuoteSymbol) {
+                  return;
+                }
+                setBaseSymbolInput(normalizedQuoteSymbol);
+                setQuoteSymbolInput(normalizedBaseSymbol);
               }}
               className="h-11 w-11 rounded-md border border-border bg-secondary text-muted-foreground transition-colors hover:text-foreground"
               aria-label="Swap base and quote assets"
@@ -307,14 +343,23 @@ export function TradingPage({ accountType }: TradingPageProps) {
 
             <div>
               <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Quote Asset</label>
-              <input
+              <select
                 value={quoteSymbolInput}
-                onChange={(event) => setQuoteSymbolInput(event.target.value)}
-                list="trade-symbol-suggestions"
-                spellCheck={false}
-                placeholder="ETH"
+                onChange={(event) => {
+                  const nextQuote = event.target.value;
+                  setQuoteSymbolInput(nextQuote);
+                  if (nextQuote === normalizedBaseSymbol) {
+                    setBaseSymbolInput(pickAlternateSymbol(normalizedBaseSymbol, nextQuote, symbolSuggestions, "BTC"));
+                  }
+                }}
                 className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono uppercase text-foreground outline-none"
-              />
+              >
+                {quoteOptions.map((symbol) => (
+                  <option key={symbol} value={symbol}>
+                    {symbol}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
