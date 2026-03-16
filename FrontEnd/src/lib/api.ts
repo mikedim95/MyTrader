@@ -163,6 +163,11 @@ export const backendApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  signupSession: (body: { username: string; password: string }) =>
+    publicApiRequest<SessionLoginResponse>("/api/session/signup", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   getDashboard: (accountType: PortfolioAccountType = "real") =>
     apiRequest<DashboardResponse>(withQuery("/api/dashboard", { accountType })),
   getTradingPairPreview: (base: string, quote: string, accountType: PortfolioAccountType = "real") =>

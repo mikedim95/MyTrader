@@ -6,6 +6,9 @@ import { userCredentialStore } from "./user-credentials/user-credential-store.js
 const BINANCE_PROD_BASE_URL = "https://api.binance.com";
 const BINANCE_TESTNET_BASE_URL = "https://testnet.binance.vision";
 const DEFAULT_RECV_WINDOW = 5000;
+const DEFAULT_REQUEST_TIMEOUT_MS = Number.parseInt(process.env.BINANCE_REQUEST_TIMEOUT_MS ?? "", 10) > 0
+  ? Number.parseInt(process.env.BINANCE_REQUEST_TIMEOUT_MS ?? "", 10)
+  : 5000;
 
 let sessionCredentials: BinanceCredentials | null = null;
 
@@ -145,9 +148,25 @@ async function requestBinance<T>(options: BinanceRequestOptions): Promise<T> {
     headers["X-MBX-APIKEY"] = credentials.apiKey;
   }
 
-  const response = await fetch(url, { method: "GET", headers });
-  const bodyText = await response.text();
-  const parsed = parseJsonSafely(bodyText);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  let bodyText = "";
+  let parsed: unknown = null;
+
+  try {
+    response = await fetch(url, { method: "GET", headers, signal: controller.signal });
+    bodyText = await response.text();
+    parsed = parseJsonSafely(bodyText);
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`Binance request timed out after ${DEFAULT_REQUEST_TIMEOUT_MS}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const message =

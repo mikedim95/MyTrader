@@ -1,9 +1,15 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
-import { Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { Loader2, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 import { backendApi } from "@/lib/api";
-import { useDashboardData, useRebalanceAllocationProfiles, useRebalanceAllocationState, useStrategies } from "@/hooks/useTradingData";
+import {
+  useDashboardData,
+  useDemoAccountSettings,
+  useRebalanceAllocationProfiles,
+  useRebalanceAllocationState,
+  useStrategies,
+} from "@/hooks/useTradingData";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type {
@@ -13,6 +19,7 @@ import type {
   RebalanceAllocationExecutionPolicy,
   RebalanceAllocationInput,
   RebalanceAllocationProfile,
+  RebalanceAllocationProfilesResponse,
   StrategyConfig,
 } from "@/types/api";
 
@@ -98,6 +105,11 @@ interface AllocationPieCardProps {
   data: AllocationChartSlice[];
   dataSignature: string;
   animationDelayMs?: number;
+}
+
+interface PendingActionModalProps {
+  title: string;
+  description: string;
 }
 
 function formatDateTime(value: string | undefined): string {
@@ -260,15 +272,38 @@ const AllocationPieCard = memo(
     previousProps.animationDelayMs === nextProps.animationDelayMs
 );
 
+function PendingActionModal({ title, description }: PendingActionModalProps) {
+  return (
+    <div className="fixed inset-0 z-[80] animate-overlay-fade">
+      <div className="absolute inset-0 bg-background/80 backdrop-blur-md" />
+      <div className="relative flex min-h-full items-center justify-center px-4 py-6">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-fade-scale-in sm:p-7">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-foreground">{title}</div>
+              <div className="mt-2 text-sm leading-6 text-muted-foreground">{description}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RebalancePage({ accountType }: RebalancePageProps) {
   const queryClient = useQueryClient();
   const { data: dashboardData } = useDashboardData(accountType);
+  const { data: demoAccountSettingsData } = useDemoAccountSettings();
 
   const { data: strategiesData, isPending: loadingStrategies, error: strategiesError } = useStrategies();
   const usableStrategies = useMemo(
     () => (strategiesData?.strategies ?? []).filter((strategy) => strategy.isEnabled && !BASIC_STRATEGY_IDS.has(strategy.id)),
     [strategiesData?.strategies]
   );
+  const defaultStrategyId = usableStrategies[0]?.id ?? "";
 
   const {
     data: profilesData,
@@ -276,6 +311,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     error: profilesError,
   } = useRebalanceAllocationProfiles();
   const profiles = profilesData?.profiles ?? [];
+  const demoAccountBalance = demoAccountSettingsData?.demoAccount.balance;
 
   const [selectedProfileId, setSelectedProfileId] = useState("");
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -305,6 +341,20 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     );
   }, [formState.allocationRows, formState.baseCurrency, portfolioAssets]);
 
+  const reservedCapitalExcludingEdit = useMemo(() => {
+    return profiles.reduce((sum, profile) => {
+      if (!profile.isEnabled) return sum;
+      if (profile.id === editingProfileId) return sum;
+      return sum + profile.allocatedCapital;
+    }, 0);
+  }, [editingProfileId, profiles]);
+
+  const projectedCapitalReservation = useMemo(() => {
+    const capital = Number(formState.allocatedCapital);
+    const requestedCapital = Number.isFinite(capital) && capital > 0 && formState.isEnabled ? capital : 0;
+    return reservedCapitalExcludingEdit + requestedCapital;
+  }, [formState.allocatedCapital, formState.isEnabled, reservedCapitalExcludingEdit]);
+
   useEffect(() => {
     if (!selectedProfileId || !profiles.some((profile) => profile.id === selectedProfileId)) {
       setSelectedProfileId(profiles[0]?.id ?? "");
@@ -312,12 +362,14 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   }, [profiles, selectedProfileId]);
 
   useEffect(() => {
-    if (!profileModalOpen && !editingProfileId) {
-      setFormState((current) =>
-        current.strategyId ? current : createDefaultFormState(usableStrategies[0]?.id ?? "", allocationAssetOptions, current.baseCurrency)
-      );
+    if (profileModalOpen || editingProfileId || !defaultStrategyId) {
+      return;
     }
-  }, [allocationAssetOptions, editingProfileId, profileModalOpen, usableStrategies]);
+
+    setFormState((current) =>
+      current.strategyId ? current : createDefaultFormState(defaultStrategyId, allocationAssetOptions, current.baseCurrency)
+    );
+  }, [allocationAssetOptions, defaultStrategyId, editingProfileId, profileModalOpen]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -329,6 +381,20 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     isPending: loadingState,
     error: stateError,
   } = useRebalanceAllocationState(selectedProfileId || undefined);
+
+  const upsertProfileInCache = (profile: RebalanceAllocationProfile): void => {
+    queryClient.setQueryData<RebalanceAllocationProfilesResponse>(["rebalance-allocation-profiles"], (current) => {
+      const existingProfiles = current?.profiles ?? [];
+      const nextProfiles = [profile, ...existingProfiles.filter((entry) => entry.id !== profile.id)];
+      return { profiles: nextProfiles };
+    });
+  };
+
+  const removeProfileFromCache = (profileId: string): void => {
+    queryClient.setQueryData<RebalanceAllocationProfilesResponse>(["rebalance-allocation-profiles"], (current) => ({
+      profiles: (current?.profiles ?? []).filter((entry) => entry.id !== profileId),
+    }));
+  };
 
   const invalidateQueries = async (profileId?: string): Promise<void> => {
     const targetProfileId = profileId ?? selectedProfileId;
@@ -344,13 +410,14 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
   const createProfileMutation = useMutation({
     mutationFn: (payload: RebalanceAllocationInput) => backendApi.createRebalanceAllocationProfile(payload),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setSuccessMessage(`Allocation "${result.profile.name}" created.`);
       setErrorMessage("");
       setProfileModalOpen(false);
       setEditingProfileId(null);
       setSelectedProfileId(result.profile.id);
-      await invalidateQueries(result.profile.id);
+      upsertProfileInCache(result.profile);
+      void invalidateQueries(result.profile.id);
     },
     onError: (error) => {
       setSuccessMessage("");
@@ -361,13 +428,14 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const updateProfileMutation = useMutation({
     mutationFn: ({ profileId, payload }: { profileId: string; payload: RebalanceAllocationInput }) =>
       backendApi.updateRebalanceAllocationProfile(profileId, payload),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setSuccessMessage(`Allocation "${result.profile.name}" updated.`);
       setErrorMessage("");
       setProfileModalOpen(false);
       setEditingProfileId(null);
       setSelectedProfileId(result.profile.id);
-      await invalidateQueries(result.profile.id);
+      upsertProfileInCache(result.profile);
+      void invalidateQueries(result.profile.id);
     },
     onError: (error) => {
       setSuccessMessage("");
@@ -377,14 +445,15 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
   const deleteProfileMutation = useMutation({
     mutationFn: (profileId: string) => backendApi.deleteRebalanceAllocationProfile(profileId),
-    onSuccess: async (_, profileId) => {
+    onSuccess: (_, profileId) => {
       const deleted = profiles.find((profile) => profile.id === profileId);
       setSuccessMessage(deleted ? `Allocation "${deleted.name}" deleted.` : "Allocation deleted.");
       setErrorMessage("");
       if (selectedProfileId === profileId) {
         setSelectedProfileId("");
       }
-      await invalidateQueries(profileId);
+      removeProfileFromCache(profileId);
+      void invalidateQueries(profileId);
     },
     onError: (error) => {
       setSuccessMessage("");
@@ -394,13 +463,13 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
   const executeProfileMutation = useMutation({
     mutationFn: (profileId: string) => backendApi.executeRebalanceAllocationProfile(profileId),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       const message = result.run.warnings.some((warning) => warning.toLowerCase().includes("executed"))
         ? "Allocation rebalance executed using the latest market prices."
         : `Allocation execution completed with status: ${result.run.status}.`;
       setSuccessMessage(message);
       setErrorMessage("");
-      await invalidateQueries(result.run.rebalanceAllocationId);
+      void invalidateQueries(result.run.rebalanceAllocationId);
     },
     onError: (error) => {
       setSuccessMessage("");
@@ -472,11 +541,28 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     !createProfileMutation.isPending &&
     !updateProfileMutation.isPending;
 
+  const pendingAction = createProfileMutation.isPending
+    ? {
+        title: "Creating allocation",
+        description: "Saving the capital bucket, validating the linked strategy, and preparing the rebalance allocation now.",
+      }
+    : updateProfileMutation.isPending
+      ? {
+          title: "Saving allocation",
+          description: "Updating the allocation profile and refreshing the linked rebalance state.",
+        }
+      : executeProfileMutation.isPending
+        ? {
+            title: "Executing allocation",
+            description: "Refreshing market data and applying the latest rebalance plan. This can take a few seconds.",
+          }
+        : null;
+
   const openCreateModal = (): void => {
     setSuccessMessage("");
     setErrorMessage("");
     setEditingProfileId(null);
-    setFormState(createDefaultFormState(usableStrategies[0]?.id ?? "", allocationAssetOptions));
+    setFormState(createDefaultFormState(defaultStrategyId, allocationAssetOptions));
     setProfileModalOpen(true);
   };
 
@@ -556,6 +642,16 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     }
     if (!Number.isFinite(allocatedCapital) || allocatedCapital <= 0) {
       setErrorMessage("Allocated capital must be greater than zero.");
+      return;
+    }
+    if (
+      formState.isEnabled &&
+      Number.isFinite(demoAccountBalance) &&
+      projectedCapitalReservation - demoAccountBalance > 0.0001
+    ) {
+      setErrorMessage(
+        `Enabled allocations would reserve ${formatUsd(projectedCapitalReservation)} while the demo account balance is ${formatUsd(demoAccountBalance)}.`
+      );
       return;
     }
     if (!baseCurrency) {
@@ -1185,6 +1281,30 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-1 gap-3 rounded-xl border border-border bg-card/60 p-4 sm:grid-cols-3">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Demo Capital</div>
+                      <div className="mt-2 text-sm font-mono text-foreground">{formatUsd(demoAccountBalance)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Already Reserved</div>
+                      <div className="mt-2 text-sm font-mono text-foreground">{formatUsd(reservedCapitalExcludingEdit)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Projected Reserved</div>
+                      <div
+                        className={cn(
+                          "mt-2 text-sm font-mono",
+                          Number.isFinite(demoAccountBalance) && projectedCapitalReservation - (demoAccountBalance ?? 0) > 0.0001
+                            ? "text-negative"
+                            : "text-foreground"
+                        )}
+                      >
+                        {formatUsd(projectedCapitalReservation)}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="space-y-3">
                     <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Execution Policy</div>
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
@@ -1385,6 +1505,8 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
           </div>
         </div>
       ) : null}
+
+      {pendingAction ? <PendingActionModal title={pendingAction.title} description={pendingAction.description} /> : null}
     </div>
   );
 }

@@ -97,8 +97,10 @@ export class StrategyRunner {
     const baseCurrency = options?.baseCurrency ?? "USDC";
     const portfolio = await getPortfolioState(accountType, baseCurrency, { demoAccount: demoSettings, userScope });
     const marketSignals = buildMarketSignalsFromPortfolio(portfolio);
-    const marketContext = await this.buildMarketContext(marketSignals, portfolio.timestamp);
-    const strategyUniverse = await this.buildStrategyUniverse(userScope);
+    const [marketContext, strategyUniverse] = await Promise.all([
+      this.buildMarketContext(marketSignals, portfolio.timestamp),
+      this.buildStrategyUniverse(userScope),
+    ]);
     const evaluation = this.engine.evaluate({
       strategy,
       portfolio,

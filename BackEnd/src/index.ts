@@ -278,6 +278,44 @@ app.post("/api/session/login", async (req, res) => {
   }
 });
 
+app.post("/api/session/signup", async (req, res) => {
+  const username = parseTextField(req.body?.username);
+  const password = parseTextField(req.body?.password);
+
+  if (!username || !password) {
+    const storage = await strategyRepository.getStorageStatus();
+    res.status(400).json({
+      message: "Username and password are required.",
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+    return;
+  }
+
+  try {
+    const session = await strategyRepository.registerUser(username, password);
+    const storage = await strategyRepository.getStorageStatus();
+    res.status(201).json({
+      session,
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+  } catch (error) {
+    const storage = await strategyRepository.getStorageStatus();
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Unable to sign up.",
+      status: {
+        requiresLogin: true,
+        ...storage,
+      },
+    });
+  }
+});
+
 app.get("/api/binance/connection", async (req, res) => {
   const userScope = resolveStrategyUserScope(req);
   const connection = await getConnectionStatus(userScope);

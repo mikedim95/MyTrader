@@ -108,6 +108,51 @@ function allocationMapsEqual(left: Record<string, number>, right: Record<string,
   });
 }
 
+function findDuplicateAllocationSymbols(allocations: Array<{ symbol: string; percent: number }>): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  allocations.forEach((entry) => {
+    const symbol = entry.symbol.trim().toUpperCase();
+    if (!symbol) return;
+    if (seen.has(symbol)) {
+      duplicates.add(symbol);
+      return;
+    }
+    seen.add(symbol);
+  });
+
+  return Array.from(duplicates).sort((left, right) => left.localeCompare(right));
+}
+
+async function validateRebalanceAllocationCapitalBudget(
+  repository: StrategyRepository,
+  input: { allocatedCapital: number; isEnabled: boolean; excludedProfileId?: string },
+  userScope?: ReturnType<typeof resolveStrategyUserScope>
+): Promise<string | null> {
+  if (!input.isEnabled) {
+    return null;
+  }
+
+  const [demoAccount, profiles] = await Promise.all([
+    repository.getDemoAccountSettings(userScope),
+    repository.listRebalanceAllocationProfiles(userScope),
+  ]);
+
+  const committedCapital = profiles.reduce((sum, profile) => {
+    if (!profile.isEnabled) return sum;
+    if (profile.id === input.excludedProfileId) return sum;
+    return sum + profile.allocatedCapital;
+  }, 0);
+
+  const projectedCapital = committedCapital + input.allocatedCapital;
+  if (projectedCapital - demoAccount.balance > 0.0001) {
+    return `Enabled allocations would reserve ${projectedCapital.toFixed(2)} while the demo account balance is ${demoAccount.balance.toFixed(2)}.`;
+  }
+
+  return null;
+}
+
 export function createStrategyRouter(deps: StrategyApiDeps): Router {
   const router = Router();
 
@@ -189,6 +234,12 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
       return;
     }
 
+    const duplicateSymbols = findDuplicateAllocationSymbols(parsed.data.allocations);
+    if (duplicateSymbols.length > 0) {
+      res.status(400).json({ message: `Duplicate allocation symbols are not allowed: ${duplicateSymbols.join(", ")}.` });
+      return;
+    }
+
     const allocation = buildAllocationMap(parsed.data.allocations);
     const totalPercent = Object.values(allocation).reduce((sum, value) => sum + value, 0);
     if (Math.abs(totalPercent - 100) > 0.0001) {
@@ -206,6 +257,19 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
         res.status(400).json({ message: "scheduleInterval must be at least 5 seconds." });
         return;
       }
+    }
+
+    const capitalBudgetError = await validateRebalanceAllocationCapitalBudget(
+      deps.repository,
+      {
+        allocatedCapital: parsed.data.allocatedCapital,
+        isEnabled: parsed.data.isEnabled,
+      },
+      userScope
+    );
+    if (capitalBudgetError) {
+      res.status(400).json({ message: capitalBudgetError });
+      return;
     }
 
     const holdings = await createDemoAccountHoldings(
@@ -270,6 +334,12 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
       return;
     }
 
+    const duplicateSymbols = findDuplicateAllocationSymbols(parsed.data.allocations);
+    if (duplicateSymbols.length > 0) {
+      res.status(400).json({ message: `Duplicate allocation symbols are not allowed: ${duplicateSymbols.join(", ")}.` });
+      return;
+    }
+
     const allocation = buildAllocationMap(parsed.data.allocations);
     const totalPercent = Object.values(allocation).reduce((sum, value) => sum + value, 0);
     if (Math.abs(totalPercent - 100) > 0.0001) {
@@ -287,6 +357,20 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
         res.status(400).json({ message: "scheduleInterval must be at least 5 seconds." });
         return;
       }
+    }
+
+    const capitalBudgetError = await validateRebalanceAllocationCapitalBudget(
+      deps.repository,
+      {
+        allocatedCapital: parsed.data.allocatedCapital,
+        isEnabled: parsed.data.isEnabled,
+        excludedProfileId: existing.id,
+      },
+      userScope
+    );
+    if (capitalBudgetError) {
+      res.status(400).json({ message: capitalBudgetError });
+      return;
     }
 
     const requiresHoldingReset =

@@ -23,6 +23,10 @@ const DEFAULT_DEMO_ACCOUNT_BALANCE = 10_000;
 const DEFAULT_DEMO_UPDATED_AT = new Date().toISOString();
 const DEFAULT_ACTIVE_USER = "dummy_alice";
 const DEFAULT_DUMMY_PASSWORD = "demo123";
+const MAX_PERSISTED_STRATEGY_RUNS = 200;
+const MAX_PERSISTED_EXECUTION_PLANS = 200;
+const MAX_PERSISTED_BACKTEST_RUNS = 50;
+const MAX_PERSISTED_BACKTEST_STEPS = 500;
 const DUMMY_USERS = [
   {
     userId: 1,
@@ -420,6 +424,21 @@ function orderByIsoDescending<T extends { createdAt?: string; startedAt?: string
   });
 }
 
+function pruneStoreForPersistence(store: StrategyStoreData): StrategyStoreData {
+  const recentBacktestRuns = orderByIsoDescending(store.backtestRuns).slice(0, MAX_PERSISTED_BACKTEST_RUNS);
+  const recentBacktestRunIds = new Set(recentBacktestRuns.map((run) => run.id));
+
+  return {
+    ...store,
+    strategyRuns: orderByIsoDescending(store.strategyRuns).slice(0, MAX_PERSISTED_STRATEGY_RUNS),
+    executionPlans: orderByIsoDescending(store.executionPlans).slice(0, MAX_PERSISTED_EXECUTION_PLANS),
+    backtestRuns: recentBacktestRuns,
+    backtestSteps: orderByIsoDescending(
+      store.backtestSteps.filter((step) => recentBacktestRunIds.has(step.backtestRunId))
+    ).slice(0, MAX_PERSISTED_BACKTEST_STEPS),
+  };
+}
+
 interface StoreRow extends RowDataPacket {
   payload: unknown;
 }
@@ -549,6 +568,35 @@ export class StrategyRepository {
 
     return this.withConnection(async (conn) => {
       const user = await this.authenticateDatabaseUser(conn, normalizedUsername, normalizedPassword);
+      this.activeUserId = user.id;
+      this.activeUsername = user.username;
+      await this.ensureStoreForUser(conn, user.id, { allowLegacyImport: false });
+
+      return {
+        userId: user.id,
+        username: user.username,
+        storageMode: "database",
+        databaseAvailable: true,
+      };
+    });
+  }
+
+  async registerUser(username: string, password: string): Promise<StrategyRepositorySession> {
+    const normalizedUsername = normalizeUsername(username);
+    const normalizedPassword = password.trim();
+
+    if (!normalizedUsername || !normalizedPassword) {
+      throw new Error("Username and password are required.");
+    }
+
+    await this.init();
+
+    if (this.storageMode === "offline") {
+      throw new Error("Sign up is unavailable while the database is offline. Use the dummy credentials shown below.");
+    }
+
+    return this.withConnection(async (conn) => {
+      const user = await this.registerDatabaseUser(conn, normalizedUsername, normalizedPassword);
       this.activeUserId = user.id;
       this.activeUsername = user.username;
       await this.ensureStoreForUser(conn, user.id, { allowLegacyImport: false });
@@ -700,6 +748,30 @@ export class StrategyRepository {
     const existing = await this.findUserByUsername(conn, normalizedUsername);
 
     if (!existing) {
+      throw new Error("Invalid username or password.");
+    }
+
+    if (!existing.password_hash) {
+      throw new Error("This account has not completed sign up yet.");
+    }
+
+    if (existing.password_hash !== passwordHash) {
+      throw new Error("Invalid username or password.");
+    }
+
+    return existing;
+  }
+
+  private async registerDatabaseUser(
+    conn: PoolConnection,
+    username: string,
+    password: string
+  ): Promise<UserRow> {
+    const normalizedUsername = normalizeUsername(username);
+    const passwordHash = hashPassword(password);
+    const existing = await this.findUserByUsername(conn, normalizedUsername);
+
+    if (!existing) {
       await conn.query(
         `
           INSERT INTO agent_users (username, email, password_hash)
@@ -714,23 +786,25 @@ export class StrategyRepository {
       return created;
     }
 
-    if (!existing.password_hash) {
-      await conn.query(
-        `
-          UPDATE agent_users
-          SET password_hash = ?
-          WHERE id = ?
-        `,
-        [passwordHash, existing.id]
-      );
-      return existing;
+    if (existing.password_hash) {
+      throw new Error("That username is already registered. Sign in instead.");
     }
 
-    if (existing.password_hash !== passwordHash) {
-      throw new Error("Invalid username or password.");
+    await conn.query(
+      `
+        UPDATE agent_users
+        SET password_hash = ?
+        WHERE id = ?
+      `,
+      [passwordHash, existing.id]
+    );
+
+    const updated = await this.findUserByUsername(conn, normalizedUsername);
+    if (!updated) {
+      throw new Error(`Unable to initialize user ${normalizedUsername}.`);
     }
 
-    return existing;
+    return updated;
   }
 
   private async resolveActiveUser(conn: PoolConnection): Promise<void> {
@@ -857,6 +931,7 @@ export class StrategyRepository {
   }
 
   private async writeStoreForUser(conn: PoolConnection, userId: number, store: StrategyStoreData): Promise<void> {
+    const persistedStore = pruneStoreForPersistence(store);
     await conn.query(
       `
         INSERT INTO strategy_user_store (user_id, payload, updated_at)
@@ -865,7 +940,7 @@ export class StrategyRepository {
           payload = VALUES(payload),
           updated_at = VALUES(updated_at)
       `,
-      [userId, JSON.stringify(store), new Date().toISOString()]
+      [userId, JSON.stringify(persistedStore), new Date().toISOString()]
     );
   }
 
@@ -907,7 +982,7 @@ export class StrategyRepository {
 
   private async writeOfflineStore(username: string, store: StrategyStoreData): Promise<void> {
     await mkdir(this.offlineStoreDir, { recursive: true });
-    await writeFile(this.getOfflineStorePath(username), JSON.stringify(store, null, 2), "utf8");
+    await writeFile(this.getOfflineStorePath(username), JSON.stringify(pruneStoreForPersistence(store), null, 2), "utf8");
   }
 
   private async ensureOfflineStore(

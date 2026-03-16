@@ -19,6 +19,7 @@ const BTC_LONG_MA_DAYS = 200;
 const BTC_CONTEXT_HISTORY_DAYS = 400;
 const BTC_DOMINANCE_LOOKBACK_DAYS = 31;
 const LIVE_CONTEXT_CACHE_TTL_MS = 60_000;
+const DAILY_CLOSE_CACHE_TTL_MS = 5 * 60_000;
 export const BTC_CONTEXT_SYMBOLS = ["BTC", "ETH", "BNB", "SOL", "ADA"] as const;
 const BTC_HALVING_DATES = [
   "2012-11-28T00:00:00.000Z",
@@ -49,6 +50,8 @@ let cachedLiveContext:
       context: StrategyMarketContextSnapshot;
     }
   | null = null;
+
+const dailyCloseCache = new Map<string, { expiresAt: number; closes: number[] }>();
 
 function round(value: number, digits = 6): number {
   return Number(value.toFixed(digits));
@@ -182,6 +185,11 @@ function buildContextFromCloses(input: {
 
 async function fetchDailyCloses(symbol: string, limit: number, fallbackClose: number): Promise<number[]> {
   const normalizedSymbol = normalizeSymbol(symbol);
+  const cacheKey = `${normalizedSymbol}:${limit}`;
+  const cached = dailyCloseCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.closes;
+  }
 
   if (normalizedSymbol === "USDC" || normalizedSymbol === "USDT") {
     return Array.from({ length: limit }, () => round(fallbackClose || 1, 6));
@@ -196,7 +204,12 @@ async function fetchDailyCloses(symbol: string, limit: number, fallbackClose: nu
     if (klines.length === 0) {
       return Array.from({ length: limit }, () => round(fallbackClose, 6));
     }
-    return klines.map((kline) => round(Number(kline[4]), 6));
+    const closes = klines.map((kline) => round(Number(kline[4]), 6));
+    dailyCloseCache.set(cacheKey, {
+      expiresAt: Date.now() + DAILY_CLOSE_CACHE_TTL_MS,
+      closes,
+    });
+    return closes;
   } catch {
     return Array.from({ length: limit }, () => round(fallbackClose, 6));
   }

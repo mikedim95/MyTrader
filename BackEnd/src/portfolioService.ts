@@ -29,6 +29,7 @@ const ASSET_METADATA: Record<string, { name: string; marketCap: number }> = {
 
 const MAX_ASSETS = parsePositiveInt(process.env.MAX_ASSETS, 20);
 const MIN_ASSET_VALUE_USD = parsePositiveFloat(process.env.MIN_ASSET_VALUE_USD, 1);
+const TICKER_CACHE_TTL_MS = 15_000;
 
 interface BinanceAccountBalance {
   asset: string;
@@ -96,7 +97,14 @@ interface AssetUsdSnapshot {
   referenceQuote: string;
 }
 
+interface TimedSnapshot<T> {
+  expiresAt: number;
+  value: T;
+}
+
 const USD_REFERENCE_QUOTES = ["USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI"] as const;
+const tickerSnapshotCache = new Map<string, TimedSnapshot<{ price: number; change24h: number; volume24h: number }>>();
+const assetUsdSnapshotCache = new Map<string, TimedSnapshot<AssetUsdSnapshot>>();
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -112,6 +120,24 @@ function parsePositiveFloat(value: string | undefined, fallback: number): number
 
 function round(value: number, decimals: number): number {
   return Number(value.toFixed(decimals));
+}
+
+function getTimedCacheValue<T>(cache: Map<string, TimedSnapshot<T>>, key: string): T | null {
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.value;
+}
+
+function setTimedCacheValue<T>(cache: Map<string, TimedSnapshot<T>>, key: string, value: T, ttlMs: number): T {
+  cache.set(key, {
+    expiresAt: Date.now() + ttlMs,
+    value,
+  });
+  return value;
 }
 
 function toNumber(value: string): number {
@@ -188,17 +214,23 @@ export async function getTickerSnapshot(
     return { price: 1, change24h: 0, volume24h: 0 };
   }
 
+  const cacheKey = `${symbol.trim().toUpperCase()}:${credentials?.testnet ? "testnet" : "prod"}`;
+  const cached = getTimedCacheValue(tickerSnapshotCache, cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const ticker = await publicGet<BinanceTicker24hResponse>(
     "/api/v3/ticker/24hr",
     { symbol: getPairSymbol(symbol) },
     credentials
   );
 
-  return {
+  return setTimedCacheValue(tickerSnapshotCache, cacheKey, {
     price: toNumber(ticker.lastPrice),
     change24h: toNumber(ticker.priceChangePercent),
     volume24h: toNumber(ticker.quoteVolume),
-  };
+  }, TICKER_CACHE_TTL_MS);
 }
 
 export async function getAssetUsdSnapshot(
@@ -209,6 +241,12 @@ export async function getAssetUsdSnapshot(
 
   if (STABLE_COINS.has(normalizedSymbol)) {
     return { price: 1, change24h: 0, volume24h: 0, referenceQuote: normalizedSymbol };
+  }
+
+  const cacheKey = `${normalizedSymbol}:${credentials?.testnet ? "testnet" : "prod"}`;
+  const cached = getTimedCacheValue(assetUsdSnapshotCache, cacheKey);
+  if (cached) {
+    return cached;
   }
 
   for (const quoteSymbol of USD_REFERENCE_QUOTES) {
@@ -223,12 +261,12 @@ export async function getAssetUsdSnapshot(
         credentials
       );
 
-      return {
+      return setTimedCacheValue(assetUsdSnapshotCache, cacheKey, {
         price: toNumber(ticker.lastPrice),
         change24h: toNumber(ticker.priceChangePercent),
         volume24h: toNumber(ticker.quoteVolume),
         referenceQuote: quoteSymbol,
-      };
+      }, TICKER_CACHE_TTL_MS);
     } catch {
       // Continue trying the next stable quote.
     }
