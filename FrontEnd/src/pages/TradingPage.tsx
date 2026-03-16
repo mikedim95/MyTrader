@@ -39,21 +39,21 @@ export function TradingPage({ accountType }: TradingPageProps) {
     value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div>
-        <h2 className="text-lg font-mono font-semibold text-foreground">Trading</h2>
+        <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">Trading</h2>
         <p className="text-sm text-muted-foreground mt-1">Basic order form for quick spot entries.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-lg border border-border bg-card p-5 space-y-4">
+        <div className="lg:col-span-2 rounded-lg border border-border bg-card p-5 space-y-4 animate-fade-up">
           <div className="flex gap-2">
             {(["Buy", "Sell"] as const).map((nextSide) => (
               <button
                 key={nextSide}
                 onClick={() => setSide(nextSide)}
                 className={cn(
-                  "flex-1 rounded-md border px-3 py-2 text-xs font-mono uppercase tracking-wider transition-colors",
+                  "flex-1 rounded-md border px-3 py-2.5 text-sm font-mono uppercase tracking-wider transition-colors",
                   side === nextSide
                     ? nextSide === "Buy"
                       ? "border-positive bg-positive/10 text-positive"
@@ -68,12 +68,12 @@ export function TradingPage({ accountType }: TradingPageProps) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Asset</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Asset</label>
               <select
                 value={selectedAsset?.symbol ?? ""}
                 onChange={(event) => setSymbol(event.target.value)}
                 disabled={isLoading || assets.length === 0}
-                className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2.5 text-sm font-mono text-foreground outline-none disabled:opacity-70"
+                className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground outline-none disabled:opacity-70"
               >
                 {assets.length === 0 ? (
                   <option value="">No live assets</option>
@@ -88,7 +88,7 @@ export function TradingPage({ accountType }: TradingPageProps) {
             </div>
 
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                 Amount ({selectedAsset?.symbol ?? "asset"})
               </label>
               <input
@@ -96,13 +96,13 @@ export function TradingPage({ accountType }: TradingPageProps) {
                 onChange={(event) => setAmount(event.target.value)}
                 placeholder="0.00"
                 disabled={isLoading || !selectedAsset}
-                className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2.5 text-sm font-mono text-foreground outline-none disabled:opacity-70"
+                className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground outline-none disabled:opacity-70"
               />
             </div>
 
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Price (USD)</label>
-              <div className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2.5 text-sm font-mono text-foreground">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Price (USD)</label>
+              <div className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground">
                 <SpinnerValue
                   loading={isLoading}
                   value={selectedAsset ? fmtUsd(selectedAsset.price) : undefined}
@@ -112,8 +112,8 @@ export function TradingPage({ accountType }: TradingPageProps) {
             </div>
 
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Estimated Total</label>
-              <div className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-2.5 text-sm font-mono text-foreground">
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Estimated Total</label>
+              <div className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground">
                 <SpinnerValue
                   loading={isLoading}
                   value={estimatedTotal !== null ? fmtUsd(estimatedTotal) : undefined}
@@ -125,19 +125,19 @@ export function TradingPage({ accountType }: TradingPageProps) {
 
           <button
             disabled={isLoading || !selectedAsset || !Number.isFinite(parsedAmount) || parsedAmount <= 0}
-            className="w-full rounded-md bg-primary px-4 py-3 text-xs font-mono font-semibold uppercase tracking-wider text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-md bg-primary px-4 py-3.5 text-sm font-mono font-semibold uppercase tracking-wider text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
           >
             Place {side} Order (Preview)
           </button>
 
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Order execution and advanced order types are currently inactive.
           </p>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Basic Market Info</div>
-          <div className="space-y-2 text-sm font-mono">
+        <div className="rounded-lg border border-border bg-card p-5 space-y-4 animate-fade-up" style={{ animationDelay: '120ms' }}>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Basic Market Info</div>
+          <div className="space-y-3 text-sm font-mono">
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Connection</span>
               <SpinnerValue
@@ -192,14 +192,14 @@ export function TradingPage({ accountType }: TradingPageProps) {
           </div>
 
           {error && !data ? (
-            <div className="rounded-md border border-negative/30 bg-negative/10 p-3 text-[11px] text-negative">
+            <div className="rounded-md border border-negative/30 bg-negative/10 p-3 text-xs text-negative">
               {error instanceof Error ? error.message : "Failed to load trading data."}
             </div>
           ) : null}
 
-          <div className="rounded-md border border-border bg-secondary/50 p-3 text-[11px] text-muted-foreground">
+          <div className="rounded-md border border-border bg-secondary/50 p-3 text-xs text-muted-foreground">
             <div className="inline-flex items-center gap-1 font-mono uppercase tracking-wider">
-              <Lock className="h-3 w-3" />
+              <Lock className="h-3.5 w-3.5" />
               Advanced Trading
             </div>
             <div className="mt-1">Limit orders, TP/SL, and automation are coming soon.</div>

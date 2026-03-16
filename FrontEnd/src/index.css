@@ -85,6 +85,7 @@
   body {
     @apply bg-background text-foreground font-sans;
     font-family: var(--font-sans);
+    font-size: 16px;
   }
 
   .app-shell {
@@ -151,6 +152,44 @@
   }
 }
 
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @layer utilities {
   .page-enter {
     animation: page-enter-keyframe var(--motion-base) var(--motion-ease) both;
@@ -158,6 +197,22 @@
 
   .pulse-accent {
     animation: soft-pulse 2.2s var(--motion-ease) infinite;
+  }
+
+  .animate-fade-up {
+    animation: fade-up 0.4s var(--motion-ease) both;
+  }
+
+  .animate-fade-scale-in {
+    animation: fade-scale-in 0.35s var(--motion-ease) both;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.35s var(--motion-ease) both;
+  }
+
+  .animate-overlay-fade {
+    animation: overlay-fade 0.25s ease-out both;
   }
 
   .text-positive {
@@ -178,4 +233,17 @@
   .bg-negative\/10 {
     background-color: hsl(var(--negative) / 0.1);
   }
+
+  /* Stagger children animation delay utility */
+  .stagger-children > * {
+    animation: fade-up 0.4s var(--motion-ease) both;
+  }
+  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-children > *:nth-child(2) { animation-delay: 60ms; }
+  .stagger-children > *:nth-child(3) { animation-delay: 120ms; }
+  .stagger-children > *:nth-child(4) { animation-delay: 180ms; }
+  .stagger-children > *:nth-child(5) { animation-delay: 240ms; }
+  .stagger-children > *:nth-child(6) { animation-delay: 300ms; }
+  .stagger-children > *:nth-child(7) { animation-delay: 360ms; }
+  .stagger-children > *:nth-child(8) { animation-delay: 420ms; }
 }

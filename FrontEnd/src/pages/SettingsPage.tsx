@@ -114,59 +114,59 @@ export function SettingsPage() {
   const isNicehashBusy = connectNicehashMutation.isPending || disconnectNicehashMutation.isPending;
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6">
       <div className="mb-6">
-        <h2 className="text-lg font-mono font-semibold text-foreground">Settings</h2>
+        <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">Settings</h2>
         <p className="text-sm text-muted-foreground mt-1">Manage per-user exchange and mining credentials.</p>
       </div>
 
-      <div className="space-y-4 max-w-2xl">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">User-Scoped Connections</div>
+      <div className="space-y-4 max-w-2xl stagger-children">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">User-Scoped Connections</div>
 
         <div className="bg-card border border-border rounded-lg p-5 space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-mono font-semibold text-foreground">Binance</span>
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${isBinanceConnected ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"}`}>
+            <span className={`text-[11px] font-mono px-2.5 py-1 rounded ${isBinanceConnected ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"}`}>
               {isBinanceConnected ? "Connected" : "Disconnected"}
             </span>
           </div>
 
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Source: {formatSource(binanceSource)} {isTestnet ? "(Testnet)" : "(Mainnet)"}
           </div>
 
           {binanceConnection?.message ? (
-            <div className="text-[11px] text-muted-foreground">{binanceConnection.message}</div>
+            <div className="text-xs text-muted-foreground">{binanceConnection.message}</div>
           ) : null}
 
           <div className="space-y-3">
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
               <input
                 value={binanceApiKey}
                 onChange={(event) => setBinanceApiKey(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="Enter Binance API key..."
                 autoComplete="off"
               />
             </div>
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">API Secret</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Secret</label>
               <input
                 type="password"
                 value={binanceApiSecret}
                 onChange={(event) => setBinanceApiSecret(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="Enter Binance API secret..."
                 autoComplete="off"
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <input
                 type="checkbox"
                 checked={testnet}
                 onChange={(event) => setTestnet(event.target.checked)}
-                className="h-3.5 w-3.5"
+                className="h-4 w-4"
               />
               Use Binance testnet
             </label>
@@ -176,76 +176,76 @@ export function SettingsPage() {
             <button
               onClick={() => connectMutation.mutate()}
               disabled={isBinanceBusy || !binanceApiKey.trim() || !binanceApiSecret.trim()}
-              className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {connectMutation.isPending ? "Connecting..." : "Connect"}
             </button>
             <button
               onClick={() => disconnectMutation.mutate()}
               disabled={isBinanceBusy}
-              className="px-4 py-2 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2.5 rounded-md border border-border text-sm font-mono text-foreground hover:bg-secondary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {disconnectMutation.isPending ? "Disconnecting..." : "Disconnect"}
             </button>
           </div>
 
-          {binanceMessage ? <div className="text-[11px] text-muted-foreground">{binanceMessage}</div> : null}
+          {binanceMessage ? <div className="text-xs text-muted-foreground">{binanceMessage}</div> : null}
         </div>
 
         <div className="bg-card border border-border rounded-lg p-5 space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-mono font-semibold text-foreground">NiceHash</span>
-            <span className={`text-[10px] font-mono px-2 py-0.5 rounded ${isNicehashConnected ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"}`}>
+            <span className={`text-[11px] font-mono px-2.5 py-1 rounded ${isNicehashConnected ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"}`}>
               {isNicehashConnected ? "Connected" : "Disconnected"}
             </span>
           </div>
 
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Source: {formatSource(nicehashSource)}
           </div>
 
           {nicehashConnection?.message ? (
-            <div className="text-[11px] text-muted-foreground">{nicehashConnection.message}</div>
+            <div className="text-xs text-muted-foreground">{nicehashConnection.message}</div>
           ) : null}
 
           <div className="space-y-3">
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
               <input
                 value={nicehashApiKey}
                 onChange={(event) => setNicehashApiKey(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="Enter NiceHash API key..."
                 autoComplete="off"
               />
             </div>
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">API Secret</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Secret</label>
               <input
                 type="password"
                 value={nicehashApiSecret}
                 onChange={(event) => setNicehashApiSecret(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="Enter NiceHash API secret..."
                 autoComplete="off"
               />
             </div>
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Organization ID</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Organization ID</label>
               <input
                 value={nicehashOrganizationId}
                 onChange={(event) => setNicehashOrganizationId(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="Enter NiceHash organization ID..."
                 autoComplete="off"
               />
             </div>
             <div>
-              <label className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">API Host</label>
+              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Host</label>
               <input
                 value={nicehashApiHost}
                 onChange={(event) => setNicehashApiHost(event.target.value)}
-                className="mt-1 w-full bg-secondary rounded-md px-3 py-2.5 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
+                className="mt-1 w-full bg-secondary rounded-md px-3 py-3 font-mono text-sm text-foreground outline-none border border-border focus:border-primary transition-colors"
                 placeholder="https://api2.nicehash.com"
                 autoComplete="off"
               />
@@ -256,26 +256,26 @@ export function SettingsPage() {
             <button
               onClick={() => connectNicehashMutation.mutate()}
               disabled={isNicehashBusy || !nicehashApiKey.trim() || !nicehashApiSecret.trim() || !nicehashOrganizationId.trim()}
-              className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-mono font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {connectNicehashMutation.isPending ? "Connecting..." : "Connect"}
             </button>
             <button
               onClick={() => disconnectNicehashMutation.mutate()}
               disabled={isNicehashBusy}
-              className="px-4 py-2 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="px-4 py-2.5 rounded-md border border-border text-sm font-mono text-foreground hover:bg-secondary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {disconnectNicehashMutation.isPending ? "Disconnecting..." : "Disconnect"}
             </button>
           </div>
 
-          {nicehashMessage ? <div className="text-[11px] text-muted-foreground">{nicehashMessage}</div> : null}
+          {nicehashMessage ? <div className="text-xs text-muted-foreground">{nicehashMessage}</div> : null}
         </div>
 
         {otherExchanges.map((exchange) => (
           <div key={exchange} className="bg-card border border-border rounded-lg p-5 flex items-center justify-between">
             <span className="text-sm font-mono text-foreground">{exchange}</span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground">Coming soon</span>
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-secondary text-muted-foreground">Coming soon</span>
           </div>
         ))}
       </div>

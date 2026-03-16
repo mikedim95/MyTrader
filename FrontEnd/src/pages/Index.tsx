@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { TopBar } from "@/components/TopBar";
+import { ProfileModal } from "@/components/ProfileModal";
 import { ComingSoonPage } from "@/components/ComingSoonPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
 import { TradingPage } from "@/pages/TradingPage";
@@ -34,6 +35,7 @@ interface IndexProps {
 const Index = ({ session, onLogout }: IndexProps) => {
   const [currentPage, setCurrentPage] = useState("portfolio");
   const [accountType, setAccountType] = useState<PortfolioAccountType>("demo");
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const renderPage = () => {
     switch (currentPage) {
@@ -67,13 +69,26 @@ const Index = ({ session, onLogout }: IndexProps) => {
     <div data-account-mode={accountType} className="app-shell flex h-screen bg-background overflow-hidden">
       <AppSidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       <div className="flex-1 flex flex-col min-w-0">
-        <TopBar accountType={accountType} onAccountTypeChange={setAccountType} session={session} onLogout={onLogout} />
+        <TopBar
+          accountType={accountType}
+          onAccountTypeChange={setAccountType}
+          session={session}
+          onLogout={onLogout}
+          onProfileOpen={() => setProfileOpen(true)}
+        />
         <main className="flex-1 overflow-y-auto">
           <div key={currentPage} className="page-enter">
             {renderPage()}
           </div>
         </main>
       </div>
+      <ProfileModal
+        session={session}
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        onLogout={onLogout}
+        onNavigate={setCurrentPage}
+      />
     </div>
   );
 };

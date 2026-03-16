@@ -31,20 +31,20 @@ export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: M
   const liveMap = getLiveMap(fleetLive);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <Table>
+    <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <Table className="min-w-[900px]">
         <TableHeader>
           <TableRow className="bg-secondary/30">
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Miner</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">IP</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Status</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Rate</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Max Board</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Hotspot</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider text-right">Fan</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Preset</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Pool</TableHead>
-            <TableHead className="font-mono text-[10px] uppercase tracking-wider">Last Seen</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider">Miner</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider">IP</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider">Status</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider text-right">Rate</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider text-right">Max Board</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider text-right hidden md:table-cell">Hotspot</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider text-right hidden md:table-cell">Fan</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider hidden lg:table-cell">Preset</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider hidden lg:table-cell">Pool</TableHead>
+            <TableHead className="font-mono text-[11px] uppercase tracking-wider hidden xl:table-cell">Last Seen</TableHead>
             <TableHead className="w-12" />
           </TableRow>
         </TableHeader>
@@ -60,26 +60,26 @@ export function MinerTable({ miners, fleetLive, onOpen, onVerify, onCommand }: M
               <TableRow key={miner.id} className="cursor-pointer transition-colors duration-200 hover:bg-secondary/40" onClick={() => onOpen(miner.id)}>
                 <TableCell>
                   <div className="font-mono text-sm font-semibold text-foreground">{miner.name}</div>
-                  <div className="mt-1 text-[11px] font-mono text-muted-foreground">
+                  <div className="mt-1 text-xs font-mono text-muted-foreground">
                     {miner.model ?? "Unknown model"}
                     {miner.firmware ? ` | ${miner.firmware}` : ""}
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{miner.ip}</TableCell>
+                <TableCell className="font-mono text-sm text-muted-foreground">{miner.ip}</TableCell>
                 <TableCell>
                   <MinerStatusBadge online={live?.online ?? false} minerState={live?.minerState} />
                 </TableCell>
-                <TableCell className="text-right font-mono text-xs text-foreground">
+                <TableCell className="text-right font-mono text-sm text-foreground">
                   {typeof live?.totalRateThs === "number" ? `${live.totalRateThs.toFixed(2)} TH/s` : "--"}
                 </TableCell>
-                <TableCell className="text-right font-mono text-xs text-foreground">{maxBoard !== null ? `${maxBoard}C` : "--"}</TableCell>
-                <TableCell className="text-right font-mono text-xs text-foreground">{maxHotspot !== null ? `${maxHotspot}C` : "--"}</TableCell>
-                <TableCell className="text-right font-mono text-xs text-foreground">
+                <TableCell className="text-right font-mono text-sm text-foreground">{maxBoard !== null ? `${maxBoard}C` : "--"}</TableCell>
+                <TableCell className="text-right font-mono text-sm text-foreground hidden md:table-cell">{maxHotspot !== null ? `${maxHotspot}C` : "--"}</TableCell>
+                <TableCell className="text-right font-mono text-sm text-foreground hidden md:table-cell">
                   {typeof live?.fanPwm === "number" ? `${live.fanPwm}%` : "--"}
                 </TableCell>
-                <TableCell className="font-mono text-xs text-foreground">{live?.presetPretty ?? live?.presetName ?? "--"}</TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">{activePool?.url ?? "--"}</TableCell>
-                <TableCell className="font-mono text-[11px] text-muted-foreground">{formatLastSeen(live?.lastSeenAt ?? miner.lastSeenAt)}</TableCell>
+                <TableCell className="font-mono text-sm text-foreground hidden lg:table-cell">{live?.presetPretty ?? live?.presetName ?? "--"}</TableCell>
+                <TableCell className="font-mono text-sm text-muted-foreground hidden lg:table-cell max-w-[200px] truncate">{activePool?.url ?? "--"}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground hidden xl:table-cell">{formatLastSeen(live?.lastSeenAt ?? miner.lastSeenAt)}</TableCell>
                 <TableCell onClick={(event) => event.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

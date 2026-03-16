@@ -93,24 +93,24 @@ export function NicehashPage() {
         : undefined;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div>
-        <h2 className="text-lg font-mono font-semibold text-foreground">NiceHash</h2>
+        <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">NiceHash</h2>
         <p className="text-sm text-muted-foreground mt-1">Live wallet and rig status from your NiceHash account.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4 stagger-children">
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Pool Status</div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Pool Status</div>
           <SpinnerValue
             loading={isLoading}
             value={data?.poolStatus ?? (data?.connected ? "Connected" : undefined)}
-            className={`mt-2 text-xl font-mono font-semibold ${data?.connected ? "text-positive" : "text-muted-foreground"}`}
+            className={`mt-2 text-lg md:text-xl font-mono font-semibold ${data?.connected ? "text-positive" : "text-muted-foreground"}`}
           />
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Active / Assigned</div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Active / Assigned</div>
           <SpinnerValue
             loading={isLoading}
             value={
@@ -120,26 +120,26 @@ export function NicehashPage() {
                   : `${data.assignedMiners}`
                 : undefined
             }
-            className="mt-2 text-xl font-mono font-semibold text-foreground"
+            className="mt-2 text-lg md:text-xl font-mono font-semibold text-foreground"
           />
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Hashrate</div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Hashrate</div>
           <SpinnerValue
             loading={isLoading}
             value={data?.hashrateTH !== null && data?.hashrateTH !== undefined ? `${data.hashrateTH.toFixed(3)} TH/s` : undefined}
-            className="mt-2 text-xl font-mono font-semibold text-foreground"
+            className="mt-2 text-lg md:text-xl font-mono font-semibold text-foreground"
           />
         </div>
 
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Est. Daily Revenue</div>
-          <SpinnerValue loading={isLoading} value={revenueValue} className="mt-2 text-xl font-mono font-semibold text-foreground" />
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Est. Daily Revenue</div>
+          <SpinnerValue loading={isLoading} value={revenueValue} className="mt-2 text-lg md:text-xl font-mono font-semibold text-foreground" />
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Total (BTC)</div>
+        <div className="rounded-lg border border-border bg-card p-4 col-span-2 md:col-span-1">
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Total (BTC)</div>
           <SpinnerValue
             loading={isLoading}
             value={
@@ -147,23 +147,23 @@ export function NicehashPage() {
                 ? data.accountTotalBTC.toFixed(8)
                 : undefined
             }
-            className="mt-2 text-xl font-mono font-semibold text-foreground"
+            className="mt-2 text-lg md:text-xl font-mono font-semibold text-foreground"
           />
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-5 space-y-2">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Pool Details</div>
+      <div className="rounded-lg border border-border bg-card p-5 space-y-2 animate-fade-up">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Pool Details</div>
         <div className="text-sm font-mono text-foreground">
           Name: <SpinnerValue loading={isLoading} value={data?.poolName ?? undefined} />
         </div>
-        <div className="text-sm font-mono text-foreground">
+        <div className="text-sm font-mono text-foreground break-all">
           URL: <SpinnerValue loading={isLoading} value={data?.poolUrl ?? undefined} />
         </div>
         <div className="text-sm font-mono text-foreground">
           Algorithm: <SpinnerValue loading={isLoading} value={data?.algorithm ?? undefined} />
         </div>
-        <div className="text-sm font-mono text-foreground">
+        <div className="text-sm font-mono text-foreground break-all">
           Mining Address: <SpinnerValue loading={isLoading} value={data?.miningAddress ?? undefined} />
         </div>
         <div className="text-sm font-mono text-foreground">
@@ -182,9 +182,9 @@ export function NicehashPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card animate-fade-up overflow-x-auto">
         <div className="px-5 py-4 border-b border-border">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Assets</div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Assets</div>
         </div>
 
         {isLoading ? (
@@ -196,13 +196,13 @@ export function NicehashPage() {
             No non-zero wallet assets found yet. Save NiceHash credentials in Settings for this user, or configure backend environment credentials.
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[500px]">
             <thead>
               <tr className="border-b border-border">
                 {["Asset", "Total", "Available", "Pending"].map((heading) => (
                   <th
                     key={heading}
-                    className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
+                    className="py-3 px-4 text-[11px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
                   >
                     {heading}
                   </th>
@@ -223,9 +223,9 @@ export function NicehashPage() {
         )}
       </div>
 
-      <div className="rounded-lg border border-border bg-card">
+      <div className="rounded-lg border border-border bg-card animate-fade-up overflow-x-auto">
         <div className="px-5 py-4 border-b border-border">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Assigned Miners</div>
+          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Assigned Miners</div>
         </div>
 
         <div className="px-5 py-3 border-b border-border">
@@ -241,7 +241,7 @@ export function NicehashPage() {
             No live NiceHash miner records received yet. Ensure your API key has mining data permission (VMDS).
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[800px]">
             <thead>
               <tr className="border-b border-border">
                 <th className="py-3 px-4 text-left w-10">
@@ -250,7 +250,7 @@ export function NicehashPage() {
                 {["Miner", "Status", "Hashrate", "Algorithm", "Unpaid", "Profitability", "Last Seen"].map((heading) => (
                   <th
                     key={heading}
-                    className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
+                    className="py-3 px-4 text-[11px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left"
                   >
                     {heading}
                   </th>
@@ -265,12 +265,12 @@ export function NicehashPage() {
                   </td>
                   <td className="py-3 px-4 text-sm font-mono text-foreground text-left">
                     {miner.name}
-                    <div className="text-[11px] text-muted-foreground">{miner.model}</div>
+                    <div className="text-xs text-muted-foreground">{miner.model}</div>
                   </td>
                   <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
                     <div className="inline-flex flex-col items-end gap-1">
                       <MinerStatusBadge online={toMinerStatus(miner.status) === "Online"} minerState={miner.status} />
-                      <span className="text-[10px] text-muted-foreground">{miner.status}</span>
+                      <span className="text-[11px] text-muted-foreground">{miner.status}</span>
                     </div>
                   </td>
                   <td className="py-3 px-4 text-right text-sm font-mono text-foreground">
@@ -292,14 +292,14 @@ export function NicehashPage() {
       </div>
 
       {error && !data ? (
-        <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">
+        <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-sm text-negative">
           {error instanceof Error ? error.message : "Failed to load NiceHash data."}
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-border bg-secondary/40 p-4 text-[11px] text-muted-foreground">
+      <div className="rounded-lg border border-border bg-secondary/40 p-4 text-xs text-muted-foreground">
         <div className="inline-flex items-center gap-1 font-mono uppercase tracking-wider">
-          <Lock className="h-3 w-3" />
+          <Lock className="h-3.5 w-3.5" />
           Coming Soon
         </div>
         <div className="mt-1">
@@ -309,4 +309,3 @@ export function NicehashPage() {
     </div>
   );
 }
-

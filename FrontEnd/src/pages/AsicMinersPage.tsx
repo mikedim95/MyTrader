@@ -126,17 +126,17 @@ export function AsicMinersPage() {
   const fleetLive = fleetData?.miners ?? [];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-4 md:p-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <h2 className="text-lg font-mono font-semibold text-foreground">VNish Fleet</h2>
+          <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">VNish Fleet</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Manual miner onboarding, backend verification, live telemetry, command execution, and persisted fleet state.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2 font-mono text-xs" onClick={() => invalidateMinerQueries()}>
+          <Button variant="outline" className="gap-2 font-mono text-sm" onClick={() => invalidateMinerQueries()}>
             <RefreshCcw className="h-4 w-4" />
             Refresh
           </Button>
@@ -153,7 +153,7 @@ export function AsicMinersPage() {
       <FleetOverviewCards overview={overviewData?.overview} />
 
       {fleetError ? (
-        <div className="rounded-lg border border-negative/40 bg-negative/10 p-4 text-sm text-negative">
+        <div className="rounded-lg border border-negative/40 bg-negative/10 p-4 text-sm text-negative animate-fade-up">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4" />
             <div>{fleetError instanceof Error ? fleetError.message : "Fleet data could not be loaded."}</div>
@@ -168,10 +168,10 @@ export function AsicMinersPage() {
         isLoading={loadingHistory}
       />
 
-      <div className="rounded-lg border border-border bg-card p-4">
+      <div className="rounded-lg border border-border bg-card p-4 animate-fade-up">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Fleet Dashboard</div>
+            <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Fleet Dashboard</div>
             <div className="mt-1 text-sm font-mono text-foreground">
               {miners.length} miners | {fleetLive.filter((miner) => miner.online).length} online
             </div>
