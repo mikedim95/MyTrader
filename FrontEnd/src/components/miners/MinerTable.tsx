@@ -1,5 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
@@ -15,7 +16,12 @@ interface MinerTableProps {
   miners: MinerEntity[];
   fleetLive: MinerLiveData[];
   isLoading?: boolean;
+  selectedMinerIds: number[];
+  allSelected: boolean;
+  someSelected: boolean;
   onOpen: (minerId: number) => void;
+  onToggleMiner: (minerId: number, checked: boolean) => void;
+  onToggleAll: (checked: boolean) => void;
   onVerify: (minerId: number) => void;
   onCommand: (minerId: number, action: "restart" | "reboot" | "start" | "stop" | "pause" | "resume") => void;
 }
@@ -29,14 +35,34 @@ function getLiveMap(fleetLive: MinerLiveData[]): Map<number, MinerLiveData> {
   return new Map(fleetLive.map((miner) => [miner.minerId, miner]));
 }
 
-export function MinerTable({ miners, fleetLive, isLoading = false, onOpen, onVerify, onCommand }: MinerTableProps) {
+export function MinerTable({
+  miners,
+  fleetLive,
+  isLoading = false,
+  selectedMinerIds,
+  allSelected,
+  someSelected,
+  onOpen,
+  onToggleMiner,
+  onToggleAll,
+  onVerify,
+  onCommand,
+}: MinerTableProps) {
   const liveMap = getLiveMap(fleetLive);
+  const selectedMinerIdSet = new Set(selectedMinerIds);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <Table className="min-w-[900px]">
         <TableHeader>
           <TableRow className="bg-secondary/30">
+            <TableHead className="w-12">
+              <Checkbox
+                checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                aria-label="Select all miners"
+                onCheckedChange={(checked) => onToggleAll(checked === true)}
+              />
+            </TableHead>
             <TableHead className="font-mono text-[11px] uppercase tracking-wider">Miner</TableHead>
             <TableHead className="font-mono text-[11px] uppercase tracking-wider">IP</TableHead>
             <TableHead className="font-mono text-[11px] uppercase tracking-wider">Status</TableHead>
@@ -55,7 +81,7 @@ export function MinerTable({ miners, fleetLive, isLoading = false, onOpen, onVer
           {isLoading
             ? Array.from({ length: 6 }).map((_, rowIndex) => (
                 <TableRow key={`miner-skeleton-${rowIndex}`}>
-                  {Array.from({ length: 11 }).map((__, cellIndex) => (
+                  {Array.from({ length: 12 }).map((__, cellIndex) => (
                     <TableCell key={`miner-skeleton-${rowIndex}-${cellIndex}`}>
                       <Skeleton className="h-4 w-full" />
                     </TableCell>
@@ -67,9 +93,22 @@ export function MinerTable({ miners, fleetLive, isLoading = false, onOpen, onVer
             const maxBoard = live?.boardTemps.length ? Math.max(...live.boardTemps) : null;
             const maxHotspot = live?.hotspotTemps.length ? Math.max(...live.hotspotTemps) : null;
             const activePool = live?.pools.find((pool, index) => live.poolActiveIndex === index) ?? live?.pools[0];
+            const isSelected = selectedMinerIdSet.has(miner.id);
 
             return (
-              <TableRow key={miner.id} className="cursor-pointer transition-colors duration-200 hover:bg-secondary/40" onClick={() => onOpen(miner.id)}>
+              <TableRow
+                key={miner.id}
+                data-state={isSelected ? "selected" : undefined}
+                className="cursor-pointer transition-colors duration-200 hover:bg-secondary/40"
+                onClick={() => onOpen(miner.id)}
+              >
+                <TableCell onClick={(event) => event.stopPropagation()}>
+                  <Checkbox
+                    checked={isSelected}
+                    aria-label={`Select miner ${miner.name}`}
+                    onCheckedChange={(checked) => onToggleMiner(miner.id, checked === true)}
+                  />
+                </TableCell>
                 <TableCell>
                   <div className="font-mono text-sm font-semibold text-foreground">{miner.name}</div>
                   <div className="mt-1 text-xs font-mono text-muted-foreground">

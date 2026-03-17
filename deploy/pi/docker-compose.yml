@@ -13,6 +13,9 @@ services:
       MYAPP_DB_PASSWORD: "${MYSQL_PASSWORD:-change-me}"
       USER_CREDENTIALS_SECRET: "${USER_CREDENTIALS_SECRET:-change-this-user-credentials-secret}"
       STRATEGY_STORE_PATH: "/app/data/strategy-store.json"
+      STRATEGY_REQUIRE_APPROVAL_FOR_REAL_RUNS: "${STRATEGY_REQUIRE_APPROVAL_FOR_REAL_RUNS:-true}"
+      STRATEGY_GLOBAL_KILL_SWITCH: "${STRATEGY_GLOBAL_KILL_SWITCH:-false}"
+      BACKTEST_PREVIEW_CACHE_TTL_MS: "${BACKTEST_PREVIEW_CACHE_TTL_MS:-60000}"
     volumes:
       - backend_data:/app/data
     ports:
@@ -68,6 +71,7 @@ services:
   n8n:
     image: n8nio/n8n:latest
     container_name: mytrader-n8n
+    profiles: ["automation"]
     restart: unless-stopped
     depends_on:
       mysql:

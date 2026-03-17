@@ -60,7 +60,7 @@ A ready-to-run Compose stack is provided at `deploy/pi/docker-compose.yml` for A
 - `mikedim95/mytrader-backend:latest`
 - `mikedim95/mytrader-frontend:latest`
 - `mysql:8.0` (persistent volume)
-- `n8nio/n8n:latest` (persistent volume, configured to use MySQL)
+- optional `n8nio/n8n:latest` profile for workflow automation
 - `nickfedor/watchtower:latest` for automatic image update checks
 
 ### Quick start on Pi
@@ -75,9 +75,15 @@ docker compose pull
 docker compose up -d
 ```
 
+To enable `n8n` as well:
+
+```bash
+docker compose --profile automation up -d
+```
+
 Endpoints after startup:
 
 - Frontend: `http://<PI_HOST_OR_IP>:8080`
 - Backend health: `http://<PI_HOST_OR_IP>:3001/api/health`
-- n8n: `http://<PI_HOST_OR_IP>:5678`
+- n8n: `http://<PI_HOST_OR_IP>:5678` when the `automation` profile is enabled
 

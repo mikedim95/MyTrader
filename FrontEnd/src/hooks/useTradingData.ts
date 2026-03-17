@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { backendApi } from "@/lib/api";
-import type { FleetHistoryScope, PortfolioAccountType } from "@/types/api";
+import type { BacktestMarketPreviewRequest, FleetHistoryScope, PortfolioAccountType } from "@/types/api";
 
 export function useDashboardData(accountType: PortfolioAccountType = "real") {
   return useQuery({
@@ -183,6 +183,26 @@ export function useStrategies() {
   });
 }
 
+export function useStrategyVersions(strategyId: string | undefined) {
+  return useQuery({
+    queryKey: ["strategy-versions", strategyId],
+    queryFn: () => backendApi.getStrategyVersions(strategyId ?? ""),
+    enabled: Boolean(strategyId),
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
+
+export function useStrategyEvaluations(strategyId: string | undefined) {
+  return useQuery({
+    queryKey: ["strategy-evaluations", strategyId],
+    queryFn: () => backendApi.getStrategyEvaluations(strategyId ?? ""),
+    enabled: Boolean(strategyId),
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
+
 export function useStrategyRuns(accountType: PortfolioAccountType = "real") {
   return useQuery({
     queryKey: ["strategy-runs", accountType],
@@ -210,6 +230,23 @@ export function useBacktests() {
     queryFn: backendApi.getBacktests,
     staleTime: 10_000,
     refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
+export function useBacktestMarketPreview(request: BacktestMarketPreviewRequest | undefined) {
+  return useQuery({
+    queryKey: [
+      "backtest-market-preview",
+      request?.startDate,
+      request?.endDate,
+      request?.baseCurrency,
+      request?.timeframe,
+      request?.symbol,
+    ],
+    queryFn: () => backendApi.getBacktestMarketPreview(request ?? { startDate: "", endDate: "" }),
+    enabled: Boolean(request?.startDate) && Boolean(request?.endDate),
+    staleTime: 60_000,
     retry: 1,
   });
 }

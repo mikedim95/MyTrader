@@ -1,5 +1,7 @@
 import type {
   BacktestCreateRequest,
+  BacktestMarketPreviewRequest,
+  BacktestMarketPreviewResponse,
   BacktestMetricsResponse,
   BacktestResponse,
   BacktestTimelineResponse,
@@ -36,9 +38,14 @@ import type {
   SessionStatusResponse,
   StrategiesResponse,
   StrategyResponse,
+  StrategyApprovalState,
+  StrategyCandidateEvaluationRequest,
+  StrategyEvaluationResponse,
+  StrategyEvaluationsResponse,
   StrategyRunResponse,
   StrategyRunsResponse,
   StrategyStateResponse,
+  StrategyVersionsResponse,
   TradingPairPreviewResponse,
   StrategyValidationResponse,
   VerifyMinerDraftResponse,
@@ -326,6 +333,20 @@ export const backendApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  getStrategyVersions: (strategyId: string) =>
+    apiRequest<StrategyVersionsResponse>(`/api/strategies/${strategyId}/versions`),
+  getStrategyEvaluations: (strategyId: string) =>
+    apiRequest<StrategyEvaluationsResponse>(`/api/strategies/${strategyId}/evaluations`),
+  evaluateStrategyCandidate: (strategyId: string, body: StrategyCandidateEvaluationRequest) =>
+    apiRequest<StrategyEvaluationResponse>(`/api/strategies/${strategyId}/evaluate-candidate`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateStrategyApprovalState: (strategyId: string, approvalState: StrategyApprovalState, approvalNote?: string) =>
+    apiRequest<StrategyResponse>(`/api/strategies/${strategyId}/approval`, {
+      method: "POST",
+      body: JSON.stringify({ approvalState, approvalNote }),
+    }),
   deleteStrategy: (strategyId: string) =>
     apiRequest<{ success: boolean }>(`/api/strategies/${strategyId}`, {
       method: "DELETE",
@@ -365,6 +386,16 @@ export const backendApi = {
       body: JSON.stringify(body),
     }),
   getBacktests: () => apiRequest<BacktestsResponse>("/api/backtests"),
+  getBacktestMarketPreview: (query: BacktestMarketPreviewRequest) =>
+    apiRequest<BacktestMarketPreviewResponse>(
+      withQuery("/api/backtests/market-preview", {
+        startDate: query.startDate,
+        endDate: query.endDate,
+        baseCurrency: query.baseCurrency,
+        timeframe: query.timeframe,
+        symbol: query.symbol,
+      })
+    ),
   getBacktest: (backtestId: string) => apiRequest<BacktestResponse>(`/api/backtests/${backtestId}`),
   getBacktestTimeline: (backtestId: string) =>
     apiRequest<BacktestTimelineResponse>(`/api/backtests/${backtestId}/timeline`),

@@ -69,6 +69,8 @@ export type StrategyRunStatus = (typeof STRATEGY_RUN_STATUSES)[number];
 
 export const BACKTEST_RUN_STATUSES = ["pending", "running", "completed", "failed"] as const;
 export type BacktestRunStatus = (typeof BACKTEST_RUN_STATUSES)[number];
+export const STRATEGY_APPROVAL_STATES = ["draft", "testing", "paper", "approved", "rejected"] as const;
+export type StrategyApprovalState = (typeof STRATEGY_APPROVAL_STATES)[number];
 
 export type AllocationMap = Record<string, number>;
 
@@ -109,6 +111,14 @@ export interface StrategyMetadata {
   expectedTurnover?: "low" | "medium" | "high";
   stablecoinExposure?: "low" | "medium" | "high";
   tags?: string[];
+}
+
+export interface StrategyRiskControls {
+  maxValidationDrawdownPct?: number;
+  minValidationReturnPct?: number;
+  maxValidationTurnoverPct?: number;
+  requirePositiveValidationReturn?: boolean;
+  requireTrainValidationSplit?: boolean;
 }
 
 export interface StrategySelectionConfig {
@@ -253,6 +263,13 @@ export interface StrategyConfig {
   strategySelectionConfig?: StrategySelectionConfig;
   weightAdjustmentConfig?: StrategyWeightAdjustmentConfig;
   marketContextConfig?: StrategyMarketContextConfig;
+  version: number;
+  lineageId: string;
+  approvalState: StrategyApprovalState;
+  approvalUpdatedAt?: string;
+  approvalNote?: string;
+  riskControls?: StrategyRiskControls;
+  latestEvaluationSummary?: StrategyCandidateEvaluationSummary;
   createdAt: string;
   updatedAt: string;
 }
@@ -361,6 +378,7 @@ export interface StrategyEvaluationResult {
   executionPlan: ExecutionPlan;
   marketContext?: StrategyMarketContextSnapshot;
   marketGate?: StrategyMarketGateResult;
+  projectedOutcome?: StrategyProjectedOutcome;
   composition?: {
     compositionMode: StrategyCompositionMode;
     autoStrategyUsage: boolean;
@@ -447,6 +465,79 @@ export interface BacktestMetrics {
   averageStablecoinAllocationPct: number;
 }
 
+export interface StrategyProjectedHolding {
+  symbol: string;
+  currentPercent: number;
+  targetPercent: number;
+  currentValue: number;
+  targetValue: number;
+  currentQuantity: number;
+  targetQuantity: number;
+  deltaValue: number;
+}
+
+export interface StrategyProjectedOutcome {
+  generatedAt: string;
+  accountType: PortfolioAccountType;
+  baseCurrency: string;
+  portfolioValue: number;
+  driftPct: number;
+  estimatedTurnoverPct: number;
+  projectedAllocation: AllocationMap;
+  holdings: StrategyProjectedHolding[];
+}
+
+export interface StrategyVersionRecord {
+  id: string;
+  strategyId: string;
+  version: number;
+  createdAt: string;
+  approvalState: StrategyApprovalState;
+  strategySnapshot: StrategyConfig;
+}
+
+export interface StrategyEvaluationWindow {
+  startDate: string;
+  endDate: string;
+  timeframe: "1h" | "1d";
+}
+
+export interface StrategyRiskCheckResult {
+  name: string;
+  passed: boolean;
+  actualValue?: number;
+  threshold?: number;
+  message: string;
+}
+
+export interface StrategyCandidateEvaluationSummary {
+  id: string;
+  strategyId: string;
+  strategyVersion: number;
+  createdAt: string;
+  trainWindow: StrategyEvaluationWindow;
+  validationWindow: StrategyEvaluationWindow;
+  trainBacktestRunId: string;
+  validationBacktestRunId: string;
+  trainMetrics: BacktestMetrics;
+  validationMetrics: BacktestMetrics;
+  riskChecks: StrategyRiskCheckResult[];
+  riskGatePassed: boolean;
+  recommendedApprovalState: StrategyApprovalState;
+  notes: string[];
+}
+
+export interface CandidateEvaluationRequest {
+  strategyId: string;
+  startDate: string;
+  endDate: string;
+  initialCapital: number;
+  baseCurrency: string;
+  validationDays?: number;
+  rebalanceCostsPct: number;
+  slippagePct: number;
+}
+
 export interface HistoricalMarketPoint {
   timestamp: string;
   prices: Record<string, number>;
@@ -468,6 +559,8 @@ export interface HistoricalMarketDataSource {
 
 export interface StrategyStoreData {
   strategies: StrategyConfig[];
+  strategyVersions: StrategyVersionRecord[];
+  strategyEvaluations: StrategyCandidateEvaluationSummary[];
   rebalanceAllocationProfiles: RebalanceAllocationProfile[];
   strategyRuns: StrategyRun[];
   executionPlans: ExecutionPlan[];

@@ -11,15 +11,33 @@ import {
   BacktestRequest,
   BacktestRun,
   BacktestStep,
+  CandidateEvaluationRequest,
   HistoricalMarketDataSource,
   MarketSignalSnapshot,
   PortfolioState,
   StrategyConfig,
+  StrategyCandidateEvaluationSummary,
+  StrategyRiskCheckResult,
 } from "./types.js";
 import { normalizeAllocation, round, sortSymbols } from "./allocation-utils.js";
 
 interface Holdings {
   [symbol: string]: number;
+}
+
+const PREVIEW_CACHE_TTL_MS = Math.max(10_000, Number(process.env.BACKTEST_PREVIEW_CACHE_TTL_MS ?? 60_000) || 60_000);
+
+function addDays(isoDate: string, days: number): string {
+  const date = new Date(isoDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
+}
+
+function deriveTimeframe(startDate: string, endDate: string): "1h" | "1d" {
+  const start = new Date(startDate).getTime();
+  const end = new Date(endDate).getTime();
+  const rangeDays = Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)));
+  return rangeDays <= 45 ? "1h" : "1d";
 }
 
 function portfolioValueFromHoldings(holdings: Holdings, prices: Record<string, number>): number {
@@ -119,11 +137,218 @@ function applyRebalance(
 }
 
 export class BacktestEngine {
+  private readonly previewCache = new Map<string, { expiresAt: number; history: Array<{ timestamp: string; price: number }> }>();
+
   constructor(
     private readonly repository: StrategyRepository,
     private readonly strategyEngine = new StrategyEngine(),
     private readonly historicalMarketData: HistoricalMarketDataSource = new MockHistoricalMarketDataSource()
   ) {}
+
+  async getMarketPreview(
+    request: Pick<BacktestRequest, "startDate" | "endDate" | "baseCurrency" | "timeframe"> & { symbol?: string }
+  ): Promise<Array<{ timestamp: string; price: number }>> {
+    const symbol = String(request.symbol ?? "BTC").trim().toUpperCase() || "BTC";
+    const cacheKey = JSON.stringify({
+      symbol,
+      startDate: request.startDate,
+      endDate: request.endDate,
+      baseCurrency: request.baseCurrency,
+      timeframe: request.timeframe,
+    });
+    const cached = this.previewCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.history.map((point) => ({ ...point }));
+    }
+
+    const series = await this.historicalMarketData.getSeries({
+      symbols: [symbol],
+      startDate: request.startDate,
+      endDate: request.endDate,
+      timeframe: request.timeframe,
+      baseCurrency: request.baseCurrency,
+    });
+
+    const history = series.map((point) => ({
+      timestamp: point.timestamp,
+      price: round(point.prices[symbol] ?? 0, 6),
+    }));
+    if (this.previewCache.size >= 12) {
+      const oldestKey = this.previewCache.keys().next().value;
+      if (oldestKey) {
+        this.previewCache.delete(oldestKey);
+      }
+    }
+    this.previewCache.set(cacheKey, {
+      expiresAt: Date.now() + PREVIEW_CACHE_TTL_MS,
+      history,
+    });
+    return history.map((point) => ({ ...point }));
+  }
+
+  async evaluateCandidateStrategy(
+    request: CandidateEvaluationRequest,
+    userScope?: StrategyUserScope
+  ): Promise<StrategyCandidateEvaluationSummary> {
+    const strategy = await this.repository.getStrategy(request.strategyId, userScope);
+    if (!strategy) {
+      throw new Error(`Strategy ${request.strategyId} was not found.`);
+    }
+
+    const validationDays = Math.max(7, Math.floor(request.validationDays ?? 45));
+    const startTs = new Date(request.startDate).getTime();
+    const endTs = new Date(request.endDate).getTime();
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || startTs >= endTs) {
+      throw new Error("Candidate evaluation requires a valid start and end date.");
+    }
+
+    const totalDays = Math.max(1, Math.floor((endTs - startTs) / (24 * 60 * 60 * 1000)));
+    if (totalDays <= validationDays + 7) {
+      throw new Error("Candidate evaluation window is too short. Keep at least 7 training days before validation.");
+    }
+
+    const validationStartDate = addDays(request.endDate, -(validationDays - 1));
+    const trainEndDate = addDays(validationStartDate, -1);
+    const timeframe = deriveTimeframe(request.startDate, trainEndDate);
+    const validationTimeframe = deriveTimeframe(validationStartDate, request.endDate);
+
+    const trainRequest: BacktestRequest = {
+      strategyId: request.strategyId,
+      startDate: request.startDate,
+      endDate: trainEndDate,
+      initialCapital: request.initialCapital,
+      baseCurrency: request.baseCurrency,
+      timeframe,
+      rebalanceCostsPct: request.rebalanceCostsPct,
+      slippagePct: request.slippagePct,
+    };
+    const validationRequest: BacktestRequest = {
+      strategyId: request.strategyId,
+      startDate: validationStartDate,
+      endDate: request.endDate,
+      initialCapital: request.initialCapital,
+      baseCurrency: request.baseCurrency,
+      timeframe: validationTimeframe,
+      rebalanceCostsPct: request.rebalanceCostsPct,
+      slippagePct: request.slippagePct,
+    };
+
+    const [trainResult, validationResult] = userScope
+      ? await Promise.all([
+          this.runBacktest(trainRequest, userScope),
+          this.runBacktest(validationRequest, userScope),
+        ])
+      : await Promise.all([
+          this.runBacktest(trainRequest),
+          this.runBacktest(validationRequest),
+        ]);
+
+    if (trainResult.run.status !== "completed" || validationResult.run.status !== "completed") {
+      throw new Error("Candidate evaluation could not complete both train and validation backtests.");
+    }
+
+    const riskChecks: StrategyRiskCheckResult[] = [];
+    const riskControls = strategy.riskControls ?? {};
+
+    if (riskControls.requireTrainValidationSplit !== false) {
+      riskChecks.push({
+        name: "train_validation_split",
+        passed: new Date(trainEndDate).getTime() > new Date(request.startDate).getTime(),
+        message: "Separate training and validation windows were generated.",
+      });
+    }
+
+    if (riskControls.requirePositiveValidationReturn !== false) {
+      const actualValue = validationResult.run.totalReturnPct ?? 0;
+      const threshold = riskControls.minValidationReturnPct ?? 0;
+      riskChecks.push({
+        name: "validation_return",
+        passed: actualValue >= threshold,
+        actualValue,
+        threshold,
+        message: `Validation return ${actualValue.toFixed(2)}% vs minimum ${threshold.toFixed(2)}%.`,
+      });
+    }
+
+    if (typeof riskControls.maxValidationDrawdownPct === "number") {
+      const actualValue = validationResult.run.maxDrawdownPct ?? 0;
+      const threshold = riskControls.maxValidationDrawdownPct;
+      riskChecks.push({
+        name: "validation_drawdown",
+        passed: actualValue <= threshold,
+        actualValue,
+        threshold,
+        message: `Validation drawdown ${actualValue.toFixed(2)}% vs max ${threshold.toFixed(2)}%.`,
+      });
+    }
+
+    if (typeof riskControls.maxValidationTurnoverPct === "number") {
+      const actualValue = validationResult.run.turnoverPct ?? 0;
+      const threshold = riskControls.maxValidationTurnoverPct;
+      riskChecks.push({
+        name: "validation_turnover",
+        passed: actualValue <= threshold,
+        actualValue,
+        threshold,
+        message: `Validation turnover ${actualValue.toFixed(2)}% vs max ${threshold.toFixed(2)}%.`,
+      });
+    }
+
+    const riskGatePassed = riskChecks.every((check) => check.passed);
+    const recommendedApprovalState =
+      riskGatePassed
+        ? "paper"
+        : (validationResult.run.totalReturnPct ?? 0) >= 0
+          ? "testing"
+          : "rejected";
+
+    const summary: StrategyCandidateEvaluationSummary = {
+      id: randomUUID(),
+      strategyId: strategy.id,
+      strategyVersion: strategy.version,
+      createdAt: new Date().toISOString(),
+      trainWindow: {
+        startDate: request.startDate,
+        endDate: trainEndDate,
+        timeframe,
+      },
+      validationWindow: {
+        startDate: validationStartDate,
+        endDate: request.endDate,
+        timeframe: validationTimeframe,
+      },
+      trainBacktestRunId: trainResult.run.id,
+      validationBacktestRunId: validationResult.run.id,
+      trainMetrics: {
+        finalPortfolioValue: trainResult.run.finalValue ?? request.initialCapital,
+        totalReturnPct: trainResult.run.totalReturnPct ?? 0,
+        annualizedReturnPct: trainResult.run.annualizedReturnPct ?? 0,
+        maxDrawdownPct: trainResult.run.maxDrawdownPct ?? 0,
+        turnoverPct: trainResult.run.turnoverPct ?? 0,
+        rebalanceCount: trainResult.run.rebalanceCount ?? 0,
+        averageStablecoinAllocationPct: trainResult.run.averageStablecoinAllocationPct ?? 0,
+      },
+      validationMetrics: {
+        finalPortfolioValue: validationResult.run.finalValue ?? request.initialCapital,
+        totalReturnPct: validationResult.run.totalReturnPct ?? 0,
+        annualizedReturnPct: validationResult.run.annualizedReturnPct ?? 0,
+        maxDrawdownPct: validationResult.run.maxDrawdownPct ?? 0,
+        turnoverPct: validationResult.run.turnoverPct ?? 0,
+        rebalanceCount: validationResult.run.rebalanceCount ?? 0,
+        averageStablecoinAllocationPct: validationResult.run.averageStablecoinAllocationPct ?? 0,
+      },
+      riskChecks,
+      riskGatePassed,
+      recommendedApprovalState,
+      notes: [
+        "Training and validation backtests reuse the same deterministic strategy engine as live evaluation.",
+        "Historical replay still uses the current built-in mock market data source.",
+      ],
+    };
+
+    await this.repository.saveStrategyEvaluation(summary, userScope);
+    return summary;
+  }
 
   async runBacktest(request: BacktestRequest): Promise<{
     run: BacktestRun;

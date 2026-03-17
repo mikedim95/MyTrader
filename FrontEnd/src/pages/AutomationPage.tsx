@@ -1,30 +1,43 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import { backendApi } from "@/lib/api";
 import {
   useBacktests,
   useStrategies,
+  useStrategyEvaluations,
   useStrategyRunDetails,
   useStrategyRuns,
   useStrategyState,
+  useStrategyVersions,
 } from "@/hooks/useTradingData";
 import type {
   BacktestCreateRequest,
   BtcHalvingPhase,
   MarketRegime,
   PortfolioAccountType,
+  StrategyApprovalState,
+  StrategyCandidateEvaluationSummary,
   StrategyConfig,
   StrategyMarketContextIndicator,
   StrategyMarketContextPriceFilter,
   StrategyMode,
   StrategyOperator,
+  StrategyVersionRecord,
 } from "@/types/api";
+import { BacktestRunnerModal } from "@/components/automation/BacktestRunnerModal";
 import { SpinnerValue } from "@/components/SpinnerValue";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 
 interface AutomationPageProps {
   accountType: PortfolioAccountType;
+}
+
+interface PendingActionModalProps {
+  title: string;
+  description: string;
 }
 
 interface DraftAllocationRow {
@@ -211,6 +224,21 @@ const MODE_HELPER_TEXT: Record<StrategyMode, string> = {
   hybrid: "You choose the allowed strategies; the engine adjusts usage dynamically.",
   automatic: "The engine selects strategies dynamically from the full base strategy catalog.",
 };
+const APPROVAL_STATE_OPTIONS: StrategyApprovalState[] = ["draft", "testing", "paper", "approved", "rejected"];
+const APPROVAL_STATE_LABELS: Record<StrategyApprovalState, string> = {
+  draft: "Draft",
+  testing: "Testing",
+  paper: "Paper",
+  approved: "Approved",
+  rejected: "Rejected",
+};
+const APPROVAL_STATE_CLASSES: Record<StrategyApprovalState, string> = {
+  draft: "border-border bg-secondary/30 text-muted-foreground",
+  testing: "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+  paper: "border-sky-500/30 bg-sky-500/10 text-sky-300",
+  approved: "border-positive/30 bg-positive/10 text-positive",
+  rejected: "border-negative/30 bg-negative/10 text-negative",
+};
 
 const MARKET_REGIME_LABELS: Record<MarketRegime, string> = {
   risk_on: "Risk On",
@@ -240,6 +268,27 @@ const MARKET_CONTEXT_INDICATOR_LABELS: Record<StrategyMarketContextIndicator, st
   btc_dominance_trend_pct: "BTC Dominance Trend %",
   btc_overheating_score: "BTC Overheating Score",
 };
+
+function PendingActionModal({ title, description }: PendingActionModalProps) {
+  return (
+    <div className="fixed inset-0 z-[80] animate-overlay-fade">
+      <div className="absolute inset-0 bg-background/80 backdrop-blur-md" />
+      <div className="relative flex min-h-full items-center justify-center px-4 py-6">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl animate-fade-scale-in sm:p-7">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-foreground">{title}</div>
+              <div className="mt-2 text-sm leading-6 text-muted-foreground">{description}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function normalizeDraftExecutionMode(strategy: StrategyConfig): StrategyMode {
   const raw = String(strategy.executionMode ?? "manual").trim().toLowerCase();
@@ -748,12 +797,28 @@ function formatDuration(startedAt: string | undefined, completedAt: string | und
   return minutes <= 0 ? `${seconds}s` : `${minutes}m ${seconds}s`;
 }
 
+function formatSignedPercent(value: number | undefined, digits = 2): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return "--";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+}
+
 function createStartIso(dateValue: string): string {
   return new Date(`${dateValue}T00:00:00.000Z`).toISOString();
 }
 
 function createEndIso(dateValue: string): string {
   return new Date(`${dateValue}T23:59:59.999Z`).toISOString();
+}
+
+function getRangeLengthDays(startDate: string, endDate: string): number {
+  const start = new Date(startDate).getTime();
+  const end = new Date(endDate).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1);
+}
+
+function deriveBacktestTimeframe(startDate: string, endDate: string): "1h" | "1d" {
+  return getRangeLengthDays(startDate, endDate) <= 45 ? "1h" : "1d";
 }
 
 function toOptionalNumber(value: string, label: string): number | undefined {
@@ -1152,15 +1217,16 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const queryClient = useQueryClient();
   const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
   const [isRunDetailsModalOpen, setIsRunDetailsModalOpen] = useState(false);
+  const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   const { data: strategyData, isPending: loadingStrategies, error: strategyError } = useStrategies();
   const { data: runData, isPending: loadingRuns } = useStrategyRuns(accountType);
   const { data: backtestData, isPending: loadingBacktests } = useBacktests();
 
-  const strategies = strategyData?.strategies ?? [];
-  const runs = runData?.runs ?? [];
-  const backtests = backtestData?.backtests ?? [];
+  const strategies = useMemo(() => strategyData?.strategies ?? [], [strategyData?.strategies]);
+  const runs = useMemo(() => runData?.runs ?? [], [runData?.runs]);
+  const backtests = useMemo(() => backtestData?.backtests ?? [], [backtestData?.backtests]);
   const strategyNameById = useMemo(
     () => new Map(strategies.map((strategy) => [strategy.id, strategy.name])),
     [strategies]
@@ -1169,7 +1235,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const [selectedStrategyId, setSelectedStrategyId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
 
-  const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const [draft, setDraft] = useState<StrategyDraft | null>(null);
@@ -1184,9 +1249,10 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
   const [initialCapital, setInitialCapital] = useState("10000");
-  const [timeframe, setTimeframe] = useState<"1h" | "1d">("1d");
   const [rebalanceCostsPct, setRebalanceCostsPct] = useState("0.001");
   const [slippagePct, setSlippagePct] = useState("0.001");
+  const [approvalStateDraft, setApprovalStateDraft] = useState<StrategyApprovalState>("draft");
+  const [approvalNoteDraft, setApprovalNoteDraft] = useState("");
 
   const readOnlyStrategies = useMemo(
     () => strategies.filter((strategy) => BASIC_STRATEGY_IDS.has(strategy.id)),
@@ -1225,11 +1291,19 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     () => usableStrategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
     [selectedStrategyId, usableStrategies]
   );
+  const backtestTimeframe = useMemo(() => deriveBacktestTimeframe(startDate, endDate), [endDate, startDate]);
+  const backtestWindowDays = useMemo(() => getRangeLengthDays(startDate, endDate), [endDate, startDate]);
+  const handleBacktestRangeChange = useCallback((range: { startDate: string; endDate: string }) => {
+    setStartDate(range.startDate);
+    setEndDate(range.endDate);
+  }, []);
   const {
     data: selectedStrategyState,
     isPending: loadingStrategyState,
     error: strategyStateError,
   } = useStrategyState(selectedStrategyId || undefined, accountType);
+  const { data: selectedStrategyVersionsData } = useStrategyVersions(selectedStrategyId || undefined);
+  const { data: selectedStrategyEvaluationsData } = useStrategyEvaluations(selectedStrategyId || undefined);
   const selectedBaseStrategyIds = useMemo(
     () => (draft ? parseStrategyIdCsv(draft.baseStrategiesCsv) : []),
     [draft]
@@ -1284,6 +1358,12 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     setDraftDirty(false);
   }, [draftDirty, draftStrategyId, selectedStrategy]);
 
+  useEffect(() => {
+    if (!selectedStrategy) return;
+    setApprovalStateDraft(selectedStrategy.approvalState);
+    setApprovalNoteDraft(selectedStrategy.approvalNote ?? "");
+  }, [selectedStrategy]);
+
   const { data: runDetailsData, isPending: loadingRunDetails } = useStrategyRunDetails(
     isRunDetailsModalOpen ? selectedRunId || undefined : undefined
   );
@@ -1291,31 +1371,69 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const selectedRunExecutionPlan = runDetailsData?.executionPlan ?? null;
   const selectedStrategyMarketContext = selectedStrategyState?.marketContext;
   const selectedStrategyMarketGate = selectedStrategyState?.marketGate;
+  const selectedProjectedOutcome = selectedStrategyState?.projectedOutcome;
+  const selectedStrategyVersions = selectedStrategyVersionsData?.versions ?? [];
+  const selectedStrategyEvaluations = selectedStrategyEvaluationsData?.evaluations ?? [];
+  const latestStrategyEvaluation: StrategyCandidateEvaluationSummary | null =
+    selectedStrategy?.latestEvaluationSummary ?? selectedStrategyEvaluations[0] ?? null;
+  const recentVersionHistory: StrategyVersionRecord[] = selectedStrategyVersions.slice(0, 3);
+  const largestProjectedMoves = useMemo(
+    () =>
+      (selectedProjectedOutcome?.holdings ?? [])
+        .filter((holding) => Math.abs(holding.deltaValue) >= 1)
+        .sort((left, right) => Math.abs(right.deltaValue) - Math.abs(left.deltaValue))
+        .slice(0, 4),
+    [selectedProjectedOutcome]
+  );
   const selectedStrategyLastRunAt = useMemo(
     () => runs.find((run) => run.strategyId === selectedStrategyId)?.startedAt ?? selectedStrategy?.lastRunAt,
     [runs, selectedStrategy?.lastRunAt, selectedStrategyId]
   );
 
-  const invalidateAll = async (): Promise<void> => {
-    await Promise.all([
+  const invalidateAll = async (options?: { strategyId?: string; runId?: string }): Promise<void> => {
+    const targetStrategyId = options?.strategyId ?? selectedStrategyId;
+    const targetRunId = options?.runId ?? selectedRunId;
+    const tasks = [
       queryClient.invalidateQueries({ queryKey: ["strategies"] }),
       queryClient.invalidateQueries({ queryKey: ["strategy-runs", accountType] }),
-      queryClient.invalidateQueries({ queryKey: ["strategy-run", selectedRunId] }),
-      queryClient.invalidateQueries({ queryKey: ["strategy-state", selectedStrategyId, accountType] }),
-      queryClient.invalidateQueries({ queryKey: ["strategy-execution-plan", selectedStrategyId, accountType] }),
       queryClient.invalidateQueries({ queryKey: ["backtests"] }),
-    ]);
+    ];
+
+    if (targetRunId) {
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-run", targetRunId] }));
+    }
+
+    if (targetStrategyId) {
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-state", targetStrategyId, accountType] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-execution-plan", targetStrategyId, accountType] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-versions", targetStrategyId] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-evaluations", targetStrategyId] }));
+    }
+
+    await Promise.all(tasks);
+  };
+
+  const upsertStrategyInCache = (strategy: StrategyConfig): void => {
+    queryClient.setQueryData<{ strategies: StrategyConfig[] } | undefined>(["strategies"], (previous) => {
+      if (!previous) return previous;
+      const exists = previous.strategies.some((item) => item.id === strategy.id);
+      return {
+        ...previous,
+        strategies: exists
+          ? previous.strategies.map((item) => (item.id === strategy.id ? strategy : item))
+          : [strategy, ...previous.strategies],
+      };
+    });
   };
 
   const runNowMutation = useMutation({
     mutationFn: (strategyId: string) => backendApi.runStrategyNow(strategyId, accountType),
     onSuccess: async (result) => {
       setErrorMessage("");
-      setMessage(`Strategy run created (${result.run.accountType}): ${result.run.status}.`);
+      toast.success(`Strategy run created (${result.run.accountType}): ${result.run.status}.`);
       await invalidateAll();
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to run strategy.");
     },
   });
@@ -1325,11 +1443,10 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       input.enabled ? backendApi.enableStrategy(input.strategyId) : backendApi.disableStrategy(input.strategyId),
     onSuccess: async (result) => {
       setErrorMessage("");
-      setMessage(`${result.strategy.name} ${result.strategy.isEnabled ? "enabled" : "disabled"}.`);
+      toast.success(`${result.strategy.name} ${result.strategy.isEnabled ? "enabled" : "disabled"}.`);
       await invalidateAll();
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to toggle strategy.");
     },
   });
@@ -1342,15 +1459,18 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       }
       return backendApi.updateStrategy(input.strategyId, input.payload);
     },
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setErrorMessage("");
-      setMessage(`Saved strategy ${result.strategy.name}.`);
+      toast.success(`Saved strategy ${result.strategy.name}.`);
       setDraft(strategyToDraft(result.strategy));
+      setDraftStrategyId(result.strategy.id);
       setDraftDirty(false);
-      await invalidateAll();
+      setEditorMode("edit");
+      closeStrategyEditor();
+      upsertStrategyInCache(result.strategy);
+      void invalidateAll({ strategyId: result.strategy.id });
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to save strategy.");
     },
   });
@@ -1363,19 +1483,19 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       }
       return backendApi.createStrategy(payload);
     },
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setErrorMessage("");
-      setMessage(`Created strategy ${result.strategy.name}.`);
+      toast.success(`Created strategy ${result.strategy.name}.`);
       setSelectedStrategyId(result.strategy.id);
       setDraft(strategyToDraft(result.strategy));
       setDraftStrategyId(result.strategy.id);
       setDraftDirty(false);
       setEditorMode("edit");
       closeStrategyEditor();
-      await invalidateAll();
+      upsertStrategyInCache(result.strategy);
+      void invalidateAll({ strategyId: result.strategy.id });
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to create strategy.");
     },
   });
@@ -1384,12 +1504,11 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     mutationFn: (strategyId: string) => backendApi.deleteStrategy(strategyId),
     onSuccess: async () => {
       setErrorMessage("");
-      setMessage("Strategy deleted.");
+      toast.success("Strategy deleted.");
       setSelectedStrategyId("");
       await invalidateAll();
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to delete strategy.");
     },
   });
@@ -1398,12 +1517,51 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     mutationFn: (payload: BacktestCreateRequest) => backendApi.createBacktest(payload),
     onSuccess: async (result) => {
       setErrorMessage("");
-      setMessage(`Backtest ${result.backtestRun.id} started.`);
+      toast.success(`Backtest ${result.backtestRun.id} started.`);
+      setIsBacktestModalOpen(false);
       await invalidateAll();
     },
     onError: (error) => {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to create backtest.");
+    },
+  });
+
+  const candidateEvaluationMutation = useMutation({
+    mutationFn: (strategyId: string) =>
+      backendApi.evaluateStrategyCandidate(strategyId, {
+        startDate: createStartIso(startDate),
+        endDate: createEndIso(endDate),
+        initialCapital: Number(initialCapital) || 10_000,
+        baseCurrency: "USDC",
+        validationDays: Math.max(14, Math.min(90, Math.round(backtestWindowDays * 0.33))),
+        rebalanceCostsPct: Number(rebalanceCostsPct) || 0.001,
+        slippagePct: Number(slippagePct) || 0.001,
+      }),
+    onSuccess: async (result) => {
+      setErrorMessage("");
+      toast.success(
+        `Candidate evaluation completed. Validation ${formatSignedPercent(result.evaluation.validationMetrics.totalReturnPct)}.`
+      );
+      await invalidateAll({ strategyId: result.strategy.id });
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to evaluate strategy candidate.");
+    },
+  });
+
+  const approvalMutation = useMutation({
+    mutationFn: (input: { strategyId: string; approvalState: StrategyApprovalState; approvalNote?: string }) =>
+      backendApi.updateStrategyApprovalState(input.strategyId, input.approvalState, input.approvalNote),
+    onSuccess: async (result) => {
+      setErrorMessage("");
+      toast.success(
+        `${result.strategy.name} moved to ${APPROVAL_STATE_LABELS[result.strategy.approvalState].toLowerCase()}.`
+      );
+      upsertStrategyInCache(result.strategy);
+      await invalidateAll({ strategyId: result.strategy.id });
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to update strategy approval state.");
     },
   });
 
@@ -1413,10 +1571,23 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     saveStrategyMutation.isPending ||
     createStrategyMutation.isPending ||
     deleteStrategyMutation.isPending ||
-    backtestMutation.isPending;
+    backtestMutation.isPending ||
+    candidateEvaluationMutation.isPending ||
+    approvalMutation.isPending;
 
   const draftValidation = useMemo(() => (draft ? validateDraft(draft) : null), [draft]);
   const draftHasErrors = draftValidation ? hasDraftValidationErrors(draftValidation) : false;
+  const editorPendingAction = createStrategyMutation.isPending
+    ? {
+        title: "Creating strategy",
+        description: "Validating and saving the new strategy. The editor will close automatically when it is ready.",
+      }
+    : saveStrategyMutation.isPending
+      ? {
+          title: "Saving strategy",
+          description: "Applying your strategy changes and refreshing the strategy state.",
+        }
+      : null;
 
   const editorFieldClass = (hasError?: boolean, compact?: boolean): string =>
     cn(
@@ -1607,7 +1778,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
   const handleSaveStrategy = (): void => {
     if (!draft) return;
     if (draftValidation && draftHasErrors) {
-      setMessage("");
       setErrorMessage(firstDraftValidationError(draftValidation) ?? "Fix validation errors before saving.");
       return;
     }
@@ -1622,7 +1792,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
         saveStrategyMutation.mutate({ strategyId: nextId, payload });
       }
     } catch (error) {
-      setMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Strategy draft is invalid.");
     }
   };
@@ -1640,7 +1809,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
 
   const handleBacktestCreate = (): void => {
     if (!selectedStrategy) {
-      setMessage("");
       setErrorMessage("Select a strategy before starting a backtest.");
       return;
     }
@@ -1650,7 +1818,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
     const slip = Number(slippagePct);
 
     if (!Number.isFinite(capital) || capital <= 0) {
-      setMessage("");
       setErrorMessage("Initial capital must be positive.");
       return;
     }
@@ -1661,9 +1828,37 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       endDate: createEndIso(endDate),
       initialCapital: capital,
       baseCurrency: "USDC",
-      timeframe,
+      timeframe: backtestTimeframe,
       rebalanceCostsPct: Number.isFinite(costs) && costs >= 0 ? costs : 0.001,
       slippagePct: Number.isFinite(slip) && slip >= 0 ? slip : 0.001,
+    });
+  };
+
+  const handleCandidateEvaluation = (): void => {
+    if (!selectedStrategy) {
+      setErrorMessage("Select a strategy before running candidate evaluation.");
+      return;
+    }
+
+    const capital = Number(initialCapital);
+    if (!Number.isFinite(capital) || capital <= 0) {
+      setErrorMessage("Initial capital must be positive.");
+      return;
+    }
+
+    candidateEvaluationMutation.mutate(selectedStrategy.id);
+  };
+
+  const handleApprovalUpdate = (): void => {
+    if (!selectedStrategy) {
+      setErrorMessage("Select a strategy before updating approval state.");
+      return;
+    }
+
+    approvalMutation.mutate({
+      strategyId: selectedStrategy.id,
+      approvalState: approvalStateDraft,
+      approvalNote: approvalNoteDraft.trim() || undefined,
     });
   };
 
@@ -1722,7 +1917,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
           {strategyError instanceof Error ? strategyError.message : "Failed to load strategies."}
         </div>
       ) : null}
-      {message ? <div className="rounded-md border border-positive/30 bg-positive/10 px-4 py-3 text-xs text-positive">{message}</div> : null}
       {errorMessage ? <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">{errorMessage}</div> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -1743,7 +1937,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
-                {["Name", "Uses Basic", "Mode", "Enabled", "Interval", "Actions"].map((heading) => (
+                {["Name", "Uses Basic", "Mode", "Approval", "Enabled", "Interval", "Actions"].map((heading) => (
                   <th key={heading} className="py-3 px-4 text-[10px] font-mono uppercase tracking-wider text-muted-foreground text-right first:text-left">{heading}</th>
                 ))}
               </tr>
@@ -1752,7 +1946,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
               {loadingStrategies ? (
                 Array.from({ length: 4 }).map((_, rowIndex) => (
                   <tr key={`strategy-skeleton-${rowIndex}`} className="border-b border-border">
-                    {Array.from({ length: 6 }).map((__, cellIndex) => (
+                    {Array.from({ length: 7 }).map((__, cellIndex) => (
                       <td key={`strategy-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
                         <Skeleton className="h-4 w-full" />
                       </td>
@@ -1760,7 +1954,7 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
                   </tr>
                 ))
               ) : usableStrategies.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">No usable strategies created yet.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">No usable strategies created yet.</td></tr>
               ) : (
                 usableStrategies.map((strategy) => (
                   <tr
@@ -1773,6 +1967,11 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
                       {formatUsedBaseStrategiesSummary(strategy)}
                     </td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.executionMode}</td>
+                    <td className="py-3 px-4 text-right text-xs font-mono">
+                      <span className={cn("inline-flex rounded-full border px-2 py-0.5", APPROVAL_STATE_CLASSES[strategy.approvalState])}>
+                        {APPROVAL_STATE_LABELS[strategy.approvalState]}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 text-right text-xs font-mono"><span className={strategy.isEnabled ? "text-positive" : "text-muted-foreground"}>{strategy.isEnabled ? "Yes" : "No"}</span></td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">{strategy.scheduleInterval}</td>
                     <td className="py-3 px-4 text-right text-xs font-mono text-foreground">
@@ -1780,7 +1979,6 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
                         onClick={(event) => {
                           event.stopPropagation();
                           setSelectedStrategyId(strategy.id);
-                          setMessage(`Using strategy ${strategy.name}.`);
                           setErrorMessage("");
                         }}
                         className="px-2 py-1 mr-1 rounded border border-border text-[11px] font-mono text-foreground hover:bg-secondary"
@@ -1817,12 +2015,130 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
 
         <div className="rounded-lg border border-border bg-card p-4 space-y-3">
           <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Selected Strategy</div>
-          <div className="text-sm font-mono text-foreground">{selectedStrategy?.name ?? "--"}</div>
-          <div className="text-xs text-muted-foreground">{selectedStrategy?.description ?? "Select a strategy to edit."}</div>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-mono text-foreground">{selectedStrategy?.name ?? "--"}</div>
+              <div className="text-xs text-muted-foreground">{selectedStrategy?.description ?? "Select a strategy to edit."}</div>
+            </div>
+            {selectedStrategy ? (
+              <span className={cn("inline-flex rounded-full border px-2 py-1 text-[11px] font-mono", APPROVAL_STATE_CLASSES[selectedStrategy.approvalState])}>
+                {APPROVAL_STATE_LABELS[selectedStrategy.approvalState]}
+              </span>
+            ) : null}
+          </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-            <div className="rounded border border-border bg-secondary/30 p-2"><div className="text-muted-foreground">Rules</div><div className="mt-1 text-foreground">{selectedStrategy?.rules.length ?? 0}</div></div>
+            <div className="rounded border border-border bg-secondary/30 p-2"><div className="text-muted-foreground">Version</div><div className="mt-1 text-foreground">v{selectedStrategy?.version ?? "--"}</div></div>
             <div className="rounded border border-border bg-secondary/30 p-2"><div className="text-muted-foreground">Last Run</div><div className="mt-1 text-foreground">{formatDateTime(selectedStrategyLastRunAt)}</div></div>
+            <div className="rounded border border-border bg-secondary/30 p-2"><div className="text-muted-foreground">Rules</div><div className="mt-1 text-foreground">{selectedStrategy?.rules.length ?? 0}</div></div>
+            <div className="rounded border border-border bg-secondary/30 p-2"><div className="text-muted-foreground">Validation Return</div><div className="mt-1 text-foreground">{formatSignedPercent(latestStrategyEvaluation?.validationMetrics.totalReturnPct)}</div></div>
+          </div>
+
+          <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Candidate Evaluation</div>
+              <button
+                onClick={handleCandidateEvaluation}
+                disabled={busy || !selectedStrategy}
+                className="rounded-md border border-border px-3 py-1.5 text-[11px] font-mono text-foreground hover:bg-secondary disabled:opacity-60"
+              >
+                Evaluate Candidate
+              </button>
+            </div>
+
+            {!selectedStrategy ? (
+              <div className="text-xs text-muted-foreground">Select a strategy to evaluate.</div>
+            ) : latestStrategyEvaluation ? (
+              <>
+                <div
+                  className={cn(
+                    "rounded border px-3 py-2 text-xs font-mono",
+                    latestStrategyEvaluation.riskGatePassed
+                      ? "border-positive/30 bg-positive/10 text-positive"
+                      : "border-negative/30 bg-negative/10 text-negative"
+                  )}
+                >
+                  {latestStrategyEvaluation.riskGatePassed
+                    ? `Risk gate passed. Recommended next state: ${APPROVAL_STATE_LABELS[latestStrategyEvaluation.recommendedApprovalState]}.`
+                    : `Risk gate failed. Recommended next state: ${APPROVAL_STATE_LABELS[latestStrategyEvaluation.recommendedApprovalState]}.`}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Train Window</div>
+                    <div className="mt-1 text-foreground">{latestStrategyEvaluation.trainWindow.startDate.slice(0, 10)} to {latestStrategyEvaluation.trainWindow.endDate.slice(0, 10)}</div>
+                  </div>
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Validation Window</div>
+                    <div className="mt-1 text-foreground">{latestStrategyEvaluation.validationWindow.startDate.slice(0, 10)} to {latestStrategyEvaluation.validationWindow.endDate.slice(0, 10)}</div>
+                  </div>
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Train Return</div>
+                    <div className="mt-1 text-foreground">{formatSignedPercent(latestStrategyEvaluation.trainMetrics.totalReturnPct)}</div>
+                  </div>
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Validation Drawdown</div>
+                    <div className="mt-1 text-foreground">{formatSignedPercent(-(latestStrategyEvaluation.validationMetrics.maxDrawdownPct ?? 0))}</div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {latestStrategyEvaluation.riskChecks.map((check) => (
+                    <div
+                      key={check.name}
+                      className={cn(
+                        "rounded border px-2 py-1 text-[11px] font-mono",
+                        check.passed ? "border-positive/20 text-positive" : "border-negative/20 text-negative"
+                      )}
+                    >
+                      {check.message}
+                    </div>
+                  ))}
+                </div>
+                {latestStrategyEvaluation.notes.length > 0 ? (
+                  <div className="text-[11px] text-muted-foreground">{latestStrategyEvaluation.notes[latestStrategyEvaluation.notes.length - 1]}</div>
+                ) : null}
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                No candidate evaluation yet. Use the current backtest window and capital to generate a train and validation report.
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Approval Workflow</div>
+            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="space-y-2">
+                <select
+                  value={approvalStateDraft}
+                  onChange={(event) => setApprovalStateDraft(event.target.value as StrategyApprovalState)}
+                  disabled={!selectedStrategy || busy}
+                  className="w-full rounded border border-border bg-secondary px-2 py-2 text-xs font-mono text-foreground outline-none disabled:opacity-60"
+                >
+                  {APPROVAL_STATE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {APPROVAL_STATE_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={approvalNoteDraft}
+                  onChange={(event) => setApprovalNoteDraft(event.target.value)}
+                  disabled={!selectedStrategy || busy}
+                  placeholder="Approval note"
+                  className="w-full rounded border border-border bg-secondary px-2 py-2 text-xs font-mono text-foreground outline-none disabled:opacity-60"
+                />
+              </div>
+              <button
+                onClick={handleApprovalUpdate}
+                disabled={busy || !selectedStrategy}
+                className="rounded-md bg-primary px-4 py-2 text-xs font-mono font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+              >
+                Apply State
+              </button>
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Paper and Approved require a passing candidate evaluation. Approved is the only state allowed for real-account runs.
+            </div>
           </div>
 
           <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
@@ -1918,7 +2234,55 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Projected Outcome</div>
+            {!selectedProjectedOutcome ? (
+              <div className="text-xs text-muted-foreground">Run the strategy preview to generate projected holdings and turnover.</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Portfolio Value</div>
+                    <div className="mt-1 text-foreground">{selectedProjectedOutcome.portfolioValue.toFixed(2)} {selectedProjectedOutcome.baseCurrency}</div>
+                  </div>
+                  <div className="rounded border border-border bg-secondary/30 p-2">
+                    <div className="text-muted-foreground">Drift / Turnover</div>
+                    <div className="mt-1 text-foreground">{selectedProjectedOutcome.driftPct.toFixed(2)}% / {selectedProjectedOutcome.estimatedTurnoverPct.toFixed(2)}%</div>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {largestProjectedMoves.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">No material holding changes are required right now.</div>
+                  ) : (
+                    largestProjectedMoves.map((holding) => (
+                      <div key={holding.symbol} className="rounded border border-border px-2 py-1 text-[11px] font-mono text-muted-foreground">
+                        <span className="text-foreground">{holding.symbol}</span>: {holding.currentPercent.toFixed(1)}% to {holding.targetPercent.toFixed(1)}% ({holding.deltaValue >= 0 ? "+" : ""}{holding.deltaValue.toFixed(2)} {selectedProjectedOutcome.baseCurrency})
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-2 rounded border border-border bg-secondary/20 p-3">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Version History</div>
+            {recentVersionHistory.length === 0 ? (
+              <div className="text-xs text-muted-foreground">No saved versions yet.</div>
+            ) : (
+              recentVersionHistory.map((version) => (
+                <div key={version.id} className="flex items-center justify-between rounded border border-border px-2 py-1 text-[11px] font-mono">
+                  <span className="text-foreground">v{version.version}</span>
+                  <span className={cn("rounded-full border px-2 py-0.5", APPROVAL_STATE_CLASSES[version.approvalState])}>
+                    {APPROVAL_STATE_LABELS[version.approvalState]}
+                  </span>
+                  <span className="text-muted-foreground">{formatDateTime(version.createdAt)}</span>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => selectedStrategy && toggleMutation.mutate({ strategyId: selectedStrategy.id, enabled: !selectedStrategy.isEnabled })}
               disabled={busy || !selectedStrategy}
@@ -1929,9 +2293,16 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
             <button
               onClick={() => selectedStrategy && runNowMutation.mutate(selectedStrategy.id)}
               disabled={busy || !selectedStrategy}
-              className="px-3 py-2 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60"
+              className="px-3 py-2 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60"
             >
               Run Now
+            </button>
+            <button
+              onClick={handleCandidateEvaluation}
+              disabled={busy || !selectedStrategy}
+              className="px-3 py-2 rounded-md bg-primary text-xs font-mono font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+            >
+              Evaluate
             </button>
           </div>
         </div>
@@ -1940,12 +2311,12 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       {isEditorModalOpen ? (
         <div className="fixed inset-0 z-50 bg-background/75 p-4" onClick={closeStrategyEditor}>
           <div className="mx-auto max-h-[92vh] w-full max-w-6xl overflow-y-auto rounded-lg border border-border bg-card p-4 space-y-4" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Structured Strategy Editor</div>
                 <div className="mt-1 text-xs font-mono text-foreground">{editorMode === "create" ? "New Usable Strategy" : selectedStrategy?.name ?? "Selected Strategy"}</div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button onClick={closeStrategyEditor} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary">Close</button>
                 <button onClick={handleResetDraft} disabled={busy || !draftDirty} className="px-3 py-1.5 rounded-md border border-border text-xs font-mono text-foreground hover:bg-secondary disabled:opacity-60">Reset</button>
                 <button onClick={handleSaveStrategy} disabled={busy || !draftDirty || !draft || draftHasErrors} className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-mono font-semibold hover:opacity-90 disabled:opacity-60">{editorMode === "create" ? "Create Strategy" : "Save Strategy"}</button>
@@ -3010,16 +3381,42 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
 
         </div>
         <div className="rounded-lg border border-border bg-card p-4 space-y-4">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Backtest Runner</div>
-          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-            <div><label className="text-muted-foreground">Start Date</label><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy} /></div>
-            <div><label className="text-muted-foreground">End Date</label><input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy} /></div>
-            <div><label className="text-muted-foreground">Initial Capital</label><input value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy} /></div>
-            <div><label className="text-muted-foreground">Timeframe</label><select value={timeframe} onChange={(event) => setTimeframe(event.target.value as "1h" | "1d")} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy}><option value="1d">1d</option><option value="1h">1h</option></select></div>
-            <div><label className="text-muted-foreground">Rebalance Cost %</label><input value={rebalanceCostsPct} onChange={(event) => setRebalanceCostsPct(event.target.value)} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy} /></div>
-            <div><label className="text-muted-foreground">Slippage %</label><input value={slippagePct} onChange={(event) => setSlippagePct(event.target.value)} className="mt-1 w-full rounded border border-border bg-secondary px-2 py-2 text-foreground outline-none" disabled={busy} /></div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Backtests</div>
+              <div className="mt-2 text-sm font-mono text-foreground">Run strategy replays from a BTC range modal.</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Choose the market window on a BTC chart, set capital, and keep execution assumptions hidden unless you need them.
+              </div>
+            </div>
+            <button
+              onClick={() => setIsBacktestModalOpen(true)}
+              disabled={!selectedStrategy || backtestMutation.isPending}
+              className="rounded-md bg-primary px-4 py-2.5 text-xs font-mono font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60"
+            >
+              Open Backtest Modal
+            </button>
           </div>
-          <button onClick={handleBacktestCreate} disabled={busy || !selectedStrategy} className="w-full rounded-md bg-primary px-4 py-2.5 text-xs font-mono font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-60">Start Backtest</button>
+
+          <div className="grid gap-2 text-xs font-mono sm:grid-cols-3">
+            <div className="rounded border border-border bg-secondary/30 p-3">
+              <div className="text-muted-foreground">Window</div>
+              <div className="mt-1 text-foreground">{backtestWindowDays} days</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">{startDate} to {endDate}</div>
+            </div>
+            <div className="rounded border border-border bg-secondary/30 p-3">
+              <div className="text-muted-foreground">Capital</div>
+              <div className="mt-1 text-foreground">{initialCapital || "--"} USDC</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">Starting balance for the replay.</div>
+            </div>
+            <div className="rounded border border-border bg-secondary/30 p-3">
+              <div className="text-muted-foreground">Resolution</div>
+              <div className="mt-1 text-foreground">{backtestTimeframe}</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {backtestTimeframe === "1h" ? "Hourly replay selected automatically." : "Daily replay selected automatically."}
+              </div>
+            </div>
+          </div>
 
           <div className="rounded border border-border overflow-hidden">
             <div className="px-3 py-2 border-b border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Recent Backtests</div>
@@ -3059,6 +3456,28 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       <div className="text-[11px] text-muted-foreground">
         {busy ? <SpinnerValue loading value={undefined} /> : "Scheduler, strategy runs, and backtests auto-refresh every 20-30 seconds."}
       </div>
+
+      <BacktestRunnerModal
+        open={isBacktestModalOpen}
+        onOpenChange={setIsBacktestModalOpen}
+        strategyName={selectedStrategy?.name}
+        initialCapital={initialCapital}
+        onInitialCapitalChange={setInitialCapital}
+        startDate={startDate}
+        endDate={endDate}
+        onDateRangeChange={handleBacktestRangeChange}
+        timeframe={backtestTimeframe}
+        rebalanceCostsPct={rebalanceCostsPct}
+        onRebalanceCostsPctChange={setRebalanceCostsPct}
+        slippagePct={slippagePct}
+        onSlippagePctChange={setSlippagePct}
+        isSubmitting={backtestMutation.isPending}
+        onSubmit={handleBacktestCreate}
+      />
+
+      {editorPendingAction ? (
+        <PendingActionModal title={editorPendingAction.title} description={editorPendingAction.description} />
+      ) : null}
     </div>
   );
 }

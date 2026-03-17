@@ -9,8 +9,11 @@ import {
   useRebalanceAllocationProfiles,
   useRebalanceAllocationState,
   useStrategies,
+  useStrategyRunDetails,
+  useStrategyRuns,
 } from "@/hooks/useTradingData";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import type {
   Asset,
@@ -21,6 +24,7 @@ import type {
   RebalanceAllocationProfile,
   RebalanceAllocationProfilesResponse,
   StrategyConfig,
+  StrategyRun,
 } from "@/types/api";
 
 const CHART_COLORS = [
@@ -63,6 +67,10 @@ const EXECUTION_POLICY_META: Record<
 };
 
 const BASE_CURRENCY_OPTIONS = ["USDC", "USDT", "FDUSD", "USD"];
+const EMPTY_ASSETS: Asset[] = [];
+const EMPTY_PROFILES: RebalanceAllocationProfile[] = [];
+const EMPTY_RUNS: StrategyRun[] = [];
+const EMPTY_ALLOCATION_MAP: Record<string, number> = {};
 
 interface RebalancePageProps {
   accountType: PortfolioAccountType;
@@ -117,6 +125,20 @@ function formatDateTime(value: string | undefined): string {
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) return "--";
   return parsed.toLocaleString();
+}
+
+function formatDuration(startedAt: string | undefined, completedAt: string | undefined): string {
+  if (!startedAt || !completedAt) return "--";
+
+  const started = new Date(startedAt).getTime();
+  const completed = new Date(completedAt).getTime();
+  if (!Number.isFinite(started) || !Number.isFinite(completed) || completed < started) return "--";
+
+  const totalSeconds = Math.floor((completed - started) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return minutes <= 0 ? `${seconds}s` : `${minutes}m ${seconds}s`;
 }
 
 function formatPercent(value: number | undefined): string {
@@ -210,12 +232,24 @@ function normalizeSymbol(value: string): string {
   return value.trim().toUpperCase();
 }
 
-function buildAllocationSignature(rows: AllocationRow[]): string {
-  return rows.map((row) => `${row.symbol}:${row.current.toFixed(4)}:${row.target.toFixed(4)}`).join("|");
-}
-
 function buildChartSignature(data: AllocationChartSlice[]): string {
   return data.map((entry) => `${entry.name}:${entry.value.toFixed(4)}`).join("|");
+}
+
+function buildAllocationRows(
+  currentAllocation: Record<string, number>,
+  targetAllocation: Record<string, number>
+): AllocationRow[] {
+  const symbols = Array.from(new Set([...Object.keys(currentAllocation), ...Object.keys(targetAllocation)])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  return symbols.map((symbol) => ({
+    symbol,
+    current: currentAllocation[symbol] ?? 0,
+    target: targetAllocation[symbol] ?? 0,
+    diff: (targetAllocation[symbol] ?? 0) - (currentAllocation[symbol] ?? 0),
+  }));
 }
 
 function getAllocationEntries(allocation: RebalanceAllocationProfile["allocation"]): Array<[string, number]> {
@@ -234,6 +268,35 @@ function renderAllocationLabel({ name, value }: { name?: string; value?: number 
 
 function getStrategyName(strategyId: string, strategies: StrategyConfig[]): string {
   return strategies.find((strategy) => strategy.id === strategyId)?.name ?? strategyId;
+}
+
+function getRunStatusClassName(status: StrategyRun["status"]): string {
+  switch (status) {
+    case "completed":
+      return "text-positive";
+    case "failed":
+      return "text-negative";
+    case "skipped":
+      return "text-amber-200";
+    default:
+      return "text-muted-foreground";
+  }
+}
+
+function getRunSummary(run: StrategyRun): string {
+  if (run.status === "failed") {
+    return run.error ?? "Execution failed.";
+  }
+  if (run.status === "skipped") {
+    return run.skipReason ?? run.warnings[0] ?? "Execution skipped.";
+  }
+  if (run.warnings.some((warning) => warning.toLowerCase().includes("executed"))) {
+    return "Rebalance executed.";
+  }
+  if (run.warnings.some((warning) => warning.toLowerCase().includes("no rebalance"))) {
+    return "Evaluated with no changes.";
+  }
+  return "Run completed.";
 }
 
 const AllocationPieCard = memo(
@@ -297,6 +360,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const queryClient = useQueryClient();
   const { data: dashboardData } = useDashboardData(accountType);
   const { data: demoAccountSettingsData } = useDemoAccountSettings();
+  const { data: historyData, isPending: loadingHistory } = useStrategyRuns("demo");
 
   const { data: strategiesData, isPending: loadingStrategies, error: strategiesError } = useStrategies();
   const usableStrategies = useMemo(
@@ -310,17 +374,19 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     isPending: loadingProfiles,
     error: profilesError,
   } = useRebalanceAllocationProfiles();
-  const profiles = profilesData?.profiles ?? [];
+  const profiles = profilesData?.profiles ?? EMPTY_PROFILES;
+  const historyRuns = historyData?.runs ?? EMPTY_RUNS;
   const demoAccountBalance = demoAccountSettingsData?.demoAccount.balance;
 
   const [selectedProfileId, setSelectedProfileId] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [runDetailsModalOpen, setRunDetailsModalOpen] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [formState, setFormState] = useState<AllocationFormState>(() => createDefaultFormState());
-  const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  const portfolioAssets = dashboardData?.assets ?? [];
+  const portfolioAssets = dashboardData?.assets ?? EMPTY_ASSETS;
   const portfolioAssetMap = useMemo(
     () =>
       portfolioAssets.reduce<Record<string, Asset>>((map, asset) => {
@@ -375,12 +441,21 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId]
   );
+  const allocationHistory = useMemo(
+    () => historyRuns.filter((run) => run.rebalanceAllocationId === selectedProfileId),
+    [historyRuns, selectedProfileId]
+  );
 
   const {
     data: state,
     isPending: loadingState,
     error: stateError,
   } = useRebalanceAllocationState(selectedProfileId || undefined);
+  const { data: runDetailsData, isPending: loadingRunDetails } = useStrategyRunDetails(
+    runDetailsModalOpen ? selectedRunId || undefined : undefined
+  );
+  const selectedRun = runDetailsData?.run ?? allocationHistory.find((run) => run.id === selectedRunId) ?? null;
+  const selectedRunExecutionPlan = runDetailsData?.executionPlan ?? null;
 
   const upsertProfileInCache = (profile: RebalanceAllocationProfile): void => {
     queryClient.setQueryData<RebalanceAllocationProfilesResponse>(["rebalance-allocation-profiles"], (current) => {
@@ -396,31 +471,39 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     }));
   };
 
-  const invalidateQueries = async (profileId?: string): Promise<void> => {
-    const targetProfileId = profileId ?? selectedProfileId;
-    await Promise.all([
+  const invalidateQueries = async (options?: { profileId?: string; includeState?: boolean; runId?: string }): Promise<void> => {
+    const targetProfileId = options?.profileId ?? selectedProfileId;
+    const tasks = [
       queryClient.invalidateQueries({ queryKey: ["rebalance-allocation-profiles"] }),
-      queryClient.invalidateQueries({ queryKey: ["rebalance-allocation-state", targetProfileId] }),
       queryClient.invalidateQueries({ queryKey: ["strategy-runs", "demo"] }),
       queryClient.invalidateQueries({ queryKey: ["strategies"] }),
       queryClient.invalidateQueries({ queryKey: ["dashboard", "demo"] }),
       queryClient.invalidateQueries({ queryKey: ["demo-account-settings"] }),
-    ]);
+    ];
+
+    if (options?.includeState !== false && targetProfileId) {
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["rebalance-allocation-state", targetProfileId] }));
+    }
+
+    if (options?.runId) {
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-run", options.runId] }));
+    }
+
+    await Promise.all(tasks);
   };
 
   const createProfileMutation = useMutation({
     mutationFn: (payload: RebalanceAllocationInput) => backendApi.createRebalanceAllocationProfile(payload),
     onSuccess: (result) => {
-      setSuccessMessage(`Allocation "${result.profile.name}" created.`);
+      toast.success(`Allocation "${result.profile.name}" created.`);
       setErrorMessage("");
       setProfileModalOpen(false);
       setEditingProfileId(null);
       setSelectedProfileId(result.profile.id);
       upsertProfileInCache(result.profile);
-      void invalidateQueries(result.profile.id);
+      void invalidateQueries({ profileId: result.profile.id });
     },
     onError: (error) => {
-      setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to create allocation.");
     },
   });
@@ -429,16 +512,15 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     mutationFn: ({ profileId, payload }: { profileId: string; payload: RebalanceAllocationInput }) =>
       backendApi.updateRebalanceAllocationProfile(profileId, payload),
     onSuccess: (result) => {
-      setSuccessMessage(`Allocation "${result.profile.name}" updated.`);
+      toast.success(`Allocation "${result.profile.name}" updated.`);
       setErrorMessage("");
       setProfileModalOpen(false);
       setEditingProfileId(null);
       setSelectedProfileId(result.profile.id);
       upsertProfileInCache(result.profile);
-      void invalidateQueries(result.profile.id);
+      void invalidateQueries({ profileId: result.profile.id });
     },
     onError: (error) => {
-      setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to update allocation.");
     },
   });
@@ -447,16 +529,17 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     mutationFn: (profileId: string) => backendApi.deleteRebalanceAllocationProfile(profileId),
     onSuccess: (_, profileId) => {
       const deleted = profiles.find((profile) => profile.id === profileId);
-      setSuccessMessage(deleted ? `Allocation "${deleted.name}" deleted.` : "Allocation deleted.");
+      toast.success(deleted ? `Allocation "${deleted.name}" deleted.` : "Allocation deleted.");
       setErrorMessage("");
+      const nextProfileId = profiles.find((profile) => profile.id !== profileId)?.id ?? "";
       if (selectedProfileId === profileId) {
-        setSelectedProfileId("");
+        setSelectedProfileId(nextProfileId);
       }
       removeProfileFromCache(profileId);
-      void invalidateQueries(profileId);
+      queryClient.removeQueries({ queryKey: ["rebalance-allocation-state", profileId], exact: true });
+      void invalidateQueries({ includeState: false });
     },
     onError: (error) => {
-      setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to delete allocation.");
     },
   });
@@ -467,40 +550,28 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       const message = result.run.warnings.some((warning) => warning.toLowerCase().includes("executed"))
         ? "Allocation rebalance executed using the latest market prices."
         : `Allocation execution completed with status: ${result.run.status}.`;
-      setSuccessMessage(message);
+      toast.success(message);
       setErrorMessage("");
-      void invalidateQueries(result.run.rebalanceAllocationId);
+      setSelectedRunId(result.run.id);
+      void invalidateQueries({ profileId: result.run.rebalanceAllocationId, runId: result.run.id });
     },
     onError: (error) => {
-      setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Unable to execute allocation.");
     },
   });
 
-  const currentAllocation = state?.executionPlan?.currentAllocation ?? state?.currentAllocation ?? {};
-  const targetAllocation = state?.executionPlan?.adjustedTargetAllocation ?? state?.adjustedTargetAllocation ?? {};
+  const currentAllocation = state?.executionPlan?.currentAllocation ?? state?.currentAllocation ?? EMPTY_ALLOCATION_MAP;
+  const targetAllocation = state?.executionPlan?.adjustedTargetAllocation ?? state?.adjustedTargetAllocation ?? EMPTY_ALLOCATION_MAP;
 
-  const allocationRows = useMemo<AllocationRow[]>(() => {
-    const symbols = Array.from(new Set([...Object.keys(currentAllocation), ...Object.keys(targetAllocation)])).sort((a, b) =>
-      a.localeCompare(b)
-    );
+  const allocationRows = useMemo<AllocationRow[]>(() => buildAllocationRows(currentAllocation, targetAllocation), [currentAllocation, targetAllocation]);
 
-    return symbols.map((symbol) => ({
-      symbol,
-      current: currentAllocation[symbol] ?? 0,
-      target: targetAllocation[symbol] ?? 0,
-      diff: (targetAllocation[symbol] ?? 0) - (currentAllocation[symbol] ?? 0),
-    }));
-  }, [currentAllocation, targetAllocation]);
-
-  const allocationSignature = useMemo(() => buildAllocationSignature(allocationRows), [allocationRows]);
   const allocationColors = useMemo(
     () =>
       allocationRows.reduce<Record<string, string>>((colorMap, row, index) => {
         colorMap[row.symbol] = CHART_COLORS[index % CHART_COLORS.length];
         return colorMap;
       }, {}),
-    [allocationRows, allocationSignature]
+    [allocationRows]
   );
 
   const currentChart = useMemo<AllocationChartSlice[]>(
@@ -508,7 +579,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       allocationRows
         .filter((row) => Number.isFinite(row.current) && row.current > 0)
         .map((row) => ({ name: row.symbol, value: row.current, color: allocationColors[row.symbol] })),
-    [allocationColors, allocationRows, allocationSignature]
+    [allocationColors, allocationRows]
   );
 
   const targetChart = useMemo<AllocationChartSlice[]>(
@@ -516,7 +587,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       allocationRows
         .filter((row) => Number.isFinite(row.target) && row.target > 0)
         .map((row) => ({ name: row.symbol, value: row.target, color: allocationColors[row.symbol] })),
-    [allocationColors, allocationRows, allocationSignature]
+    [allocationColors, allocationRows]
   );
 
   const currentChartSignature = useMemo(() => buildChartSignature(currentChart), [currentChart]);
@@ -531,6 +602,37 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     if (!selectedProfile) return "--";
     return state?.strategy?.name ?? getStrategyName(selectedProfile.strategyId, strategiesData?.strategies ?? []);
   }, [selectedProfile, state?.strategy?.name, strategiesData?.strategies]);
+  const selectedRunBaseCurrency =
+    selectedRun?.inputSnapshot?.portfolio.baseCurrency ?? selectedProfile?.baseCurrency ?? "USDC";
+  const selectedRunAllocationRows = useMemo<AllocationRow[]>(
+    () =>
+      buildAllocationRows(
+        selectedRunExecutionPlan?.currentAllocation ?? selectedRun?.inputSnapshot?.portfolio.allocation ?? {},
+        selectedRunExecutionPlan?.adjustedTargetAllocation ?? selectedRun?.adjustedAllocation ?? {}
+      ),
+    [selectedRun?.adjustedAllocation, selectedRun?.inputSnapshot?.portfolio.allocation, selectedRunExecutionPlan]
+  );
+  const selectedRunSummary = useMemo(() => {
+    if (!selectedRun) return "Select a rebalance event to inspect it.";
+    if (selectedRun.status === "failed") {
+      return selectedRun.error ?? "This rebalance event failed before completion.";
+    }
+    if (selectedRun.status === "skipped") {
+      return selectedRun.skipReason ?? selectedRun.warnings[0] ?? "This rebalance event was skipped.";
+    }
+    if (!selectedRunExecutionPlan) {
+      return "Loading the execution plan for this rebalance event.";
+    }
+
+    const portfolioValue = selectedRun.inputSnapshot?.portfolio.totalValue;
+    const assetCount = selectedRun.inputSnapshot?.portfolio.assets.length ?? 0;
+    const tradeCount = selectedRunExecutionPlan.recommendedTrades.length;
+    const executionState = selectedRun.warnings.some((warning) => warning.toLowerCase().includes("executed"))
+      ? "The rebalance executed"
+      : "The rebalance evaluated";
+
+    return `${executionState} from ${formatNotional(portfolioValue, selectedRunBaseCurrency)}${assetCount > 0 ? ` across ${assetCount} assets` : ""}. Drift measured ${formatPercent(selectedRunExecutionPlan.driftPct)}, estimated turnover was ${formatPercent(selectedRunExecutionPlan.estimatedTurnoverPct)}, and ${tradeCount} trade${tradeCount === 1 ? "" : "s"} ${tradeCount === 1 ? "was" : "were"} generated.`;
+  }, [selectedRun, selectedRunBaseCurrency, selectedRunExecutionPlan]);
 
   const selectedPolicy = selectedProfile?.executionPolicy ?? "manual";
   const canExecute =
@@ -558,8 +660,18 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
           }
         : null;
 
+  useEffect(() => {
+    if (allocationHistory.length === 0) {
+      setSelectedRunId("");
+      return;
+    }
+
+    if (!selectedRunId || !allocationHistory.some((run) => run.id === selectedRunId)) {
+      setSelectedRunId(allocationHistory[0]?.id ?? "");
+    }
+  }, [allocationHistory, selectedRunId]);
+
   const openCreateModal = (): void => {
-    setSuccessMessage("");
     setErrorMessage("");
     setEditingProfileId(null);
     setFormState(createDefaultFormState(defaultStrategyId, allocationAssetOptions));
@@ -567,7 +679,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   };
 
   const openEditModal = (profile: RebalanceAllocationProfile): void => {
-    setSuccessMessage("");
     setErrorMessage("");
     setEditingProfileId(profile.id);
     setFormState(createFormStateFromProfile(profile));
@@ -696,7 +807,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       scheduleInterval: formState.executionPolicy === "interval" ? formState.scheduleInterval.trim().toLowerCase() : undefined,
     };
 
-    setSuccessMessage("");
     setErrorMessage("");
 
     if (editingProfileId) {
@@ -710,9 +820,17 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const removeProfile = (profile: RebalanceAllocationProfile): void => {
     if (deleteProfileMutation.isPending) return;
     if (!window.confirm(`Delete allocation "${profile.name}"?`)) return;
-    setSuccessMessage("");
     setErrorMessage("");
     deleteProfileMutation.mutate(profile.id);
+  };
+
+  const openRunDetails = (runId: string): void => {
+    setSelectedRunId(runId);
+    setRunDetailsModalOpen(true);
+  };
+
+  const closeRunDetails = (): void => {
+    setRunDetailsModalOpen(false);
   };
 
   return (
@@ -762,10 +880,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       <div className="rounded-lg border border-border bg-card px-4 py-3 text-[11px] text-muted-foreground">
         Strategies decide the target. Allocation profiles define the capital, holdings, and auto-execution rules for each specific rebalance situation.
       </div>
-
-      {successMessage ? (
-        <div className="rounded-md border border-positive/30 bg-positive/10 px-4 py-3 text-xs text-positive">{successMessage}</div>
-      ) : null}
 
       {errorMessage ? (
         <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs text-negative">{errorMessage}</div>
@@ -1165,9 +1279,387 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
               <div>Next scheduled check: {formatDateTime(selectedProfile.nextExecutionAt)}</div>
             </div>
           </div>
+
+          <div className="rounded-lg border border-border bg-card overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Rebalance History</div>
+              <div className="text-[11px] font-mono text-muted-foreground">
+                {allocationHistory.length} event{allocationHistory.length === 1 ? "" : "s"}
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[920px]">
+                <thead>
+                  <tr className="border-b border-border">
+                    {["Started", "Status", "Trigger", "Completed", "Duration", "Notes", "Action"].map((heading) => (
+                      <th
+                        key={heading}
+                        className={cn(
+                          "px-4 py-3 text-right text-[10px] font-mono uppercase tracking-wider text-muted-foreground first:text-left",
+                          heading === "Action" ? "sticky right-0 z-10 bg-card" : ""
+                        )}
+                      >
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingHistory ? (
+                    Array.from({ length: 4 }).map((_, rowIndex) => (
+                      <tr key={`history-skeleton-${rowIndex}`} className="border-b border-border last:border-b-0">
+                        {Array.from({ length: 7 }).map((__, cellIndex) => (
+                          <td key={`history-skeleton-${rowIndex}-${cellIndex}`} className="px-4 py-3">
+                            <Skeleton className={cn("h-4", cellIndex === 6 ? "ml-auto w-20" : "w-full")} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  ) : allocationHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                        No rebalance events have been recorded for this allocation yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    allocationHistory.slice(0, 12).map((run) => {
+                      const selected = run.id === selectedRunId;
+
+                      return (
+                        <tr
+                          key={run.id}
+                          className={cn(
+                            "group cursor-pointer border-b border-border last:border-b-0",
+                            selected ? "bg-secondary/40" : "hover:bg-secondary/20"
+                          )}
+                          onClick={() => openRunDetails(run.id)}
+                        >
+                          <td className="px-4 py-3 text-left text-xs font-mono text-muted-foreground">{formatDateTime(run.startedAt)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-mono">
+                            <span className={getRunStatusClassName(run.status)}>{run.status}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-xs font-mono text-foreground">{run.trigger}</td>
+                          <td className="px-4 py-3 text-right text-xs font-mono text-muted-foreground">{formatDateTime(run.completedAt)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-mono text-foreground">{formatDuration(run.startedAt, run.completedAt)}</td>
+                          <td className="px-4 py-3 text-right text-xs font-mono text-muted-foreground">
+                            <div className="ml-auto max-w-[320px] truncate">{getRunSummary(run)}</div>
+                          </td>
+                          <td
+                            className={cn(
+                              "sticky right-0 z-10 px-4 py-3 text-right",
+                              selected ? "bg-secondary/40" : "bg-card group-hover:bg-secondary/20"
+                            )}
+                          >
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openRunDetails(run.id);
+                              }}
+                              className="rounded-md border border-border px-2.5 py-1.5 text-[11px] font-mono text-foreground hover:bg-secondary"
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-border px-4 py-3 text-xs font-mono text-muted-foreground">
+              Click any event to open the full rebalance explanation and trade breakdown.
+            </div>
+          </div>
             </>
           ) : null}
         </>
+      ) : null}
+
+      {runDetailsModalOpen ? (
+        <div className="fixed inset-0 z-[75] animate-overlay-fade" onClick={closeRunDetails}>
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-md" />
+          <div className="relative flex min-h-full items-center justify-center px-4 py-6">
+            <div
+              className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl animate-fade-scale-in"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-border bg-card/95 px-5 py-4 backdrop-blur">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Rebalance Event</div>
+                  <div className="mt-1 truncate text-sm font-mono text-foreground">
+                    {selectedRun?.rebalanceAllocationName ?? selectedProfile?.name ?? "--"}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {selectedRun ? `Started ${formatDateTime(selectedRun.startedAt)}` : "Select a rebalance event to inspect it."}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeRunDetails}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs font-mono text-foreground hover:bg-secondary"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+                {loadingRunDetails ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <Skeleton key={`run-details-metric-skeleton-${index}`} className="h-16 w-full" />
+                      ))}
+                    </div>
+                    <Skeleton className="h-28 w-full" />
+                    <Skeleton className="h-56 w-full" />
+                    <Skeleton className="h-48 w-full" />
+                  </div>
+                ) : !selectedRun ? (
+                  <div className="text-sm text-muted-foreground">No rebalance event selected.</div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-6 text-xs font-mono">
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Status</div>
+                        <div className={cn("mt-2 text-sm", getRunStatusClassName(selectedRun.status))}>{selectedRun.status}</div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Trigger</div>
+                        <div className="mt-2 text-sm text-foreground">{selectedRun.trigger}</div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Started</div>
+                        <div className="mt-2 text-sm text-foreground">{formatDateTime(selectedRun.startedAt)}</div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Completed</div>
+                        <div className="mt-2 text-sm text-foreground">{formatDateTime(selectedRun.completedAt)}</div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Duration</div>
+                        <div className="mt-2 text-sm text-foreground">{formatDuration(selectedRun.startedAt, selectedRun.completedAt)}</div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                        <div className="text-muted-foreground">Warnings</div>
+                        <div className="mt-2 text-sm text-foreground">{selectedRun.warnings.length}</div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">How This Rebalance Happened</div>
+                      <div className="mt-2 text-sm leading-6 text-foreground">{selectedRunSummary}</div>
+                    </div>
+
+                    {selectedRun.error ? (
+                      <div className="rounded-md border border-negative/30 bg-negative/10 px-4 py-3 text-xs font-mono text-negative">
+                        {selectedRun.error}
+                      </div>
+                    ) : null}
+
+                    {selectedRun.skipReason ? (
+                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-mono text-amber-200">
+                        Skip Reason: {selectedRun.skipReason}
+                      </div>
+                    ) : null}
+
+                    {selectedRunExecutionPlan ? (
+                      <div className="grid grid-cols-2 gap-3 md:grid-cols-5 text-xs font-mono">
+                        <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="text-muted-foreground">Portfolio Value</div>
+                          <div className="mt-2 text-sm text-foreground">
+                            {formatNotional(selectedRun.inputSnapshot?.portfolio.totalValue, selectedRunBaseCurrency)}
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="text-muted-foreground">Rebalance Required</div>
+                          <div className="mt-2 text-sm text-foreground">{selectedRunExecutionPlan.rebalanceRequired ? "Yes" : "No"}</div>
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="text-muted-foreground">Drift</div>
+                          <div className="mt-2 text-sm text-foreground">{formatPercent(selectedRunExecutionPlan.driftPct)}</div>
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="text-muted-foreground">Turnover</div>
+                          <div className="mt-2 text-sm text-foreground">{formatPercent(selectedRunExecutionPlan.estimatedTurnoverPct)}</div>
+                        </div>
+                        <div className="rounded-lg border border-border bg-secondary/30 p-3">
+                          <div className="text-muted-foreground">Trade Count</div>
+                          <div className="mt-2 text-sm text-foreground">{selectedRunExecutionPlan.recommendedTrades.length}</div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="border-b border-border px-4 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                        Allocation Shift
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px]">
+                          <thead>
+                            <tr className="border-b border-border">
+                              {["Asset", "Before", "Target", "Difference", "Action"].map((heading) => (
+                                <th
+                                  key={heading}
+                                  className="px-4 py-3 text-right text-[10px] font-mono uppercase tracking-wider text-muted-foreground first:text-left"
+                                >
+                                  {heading}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedRunAllocationRows.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                  No allocation comparison is available for this event.
+                                </td>
+                              </tr>
+                            ) : (
+                              selectedRunAllocationRows.map((row) => (
+                                <tr key={`run-allocation-${row.symbol}`} className="border-b border-border last:border-b-0">
+                                  <td className="px-4 py-3 text-left text-sm font-mono text-foreground">{row.symbol}</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.current.toFixed(2)}%</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.target.toFixed(2)}%</td>
+                                  <td
+                                    className={cn(
+                                      "px-4 py-3 text-right text-sm font-mono",
+                                      row.diff > 0 ? "text-positive" : row.diff < 0 ? "text-negative" : "text-muted-foreground"
+                                    )}
+                                  >
+                                    {row.diff > 0 ? "+" : ""}
+                                    {row.diff.toFixed(2)}%
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono">
+                                    <span
+                                      className={cn(
+                                        "rounded px-2 py-1 text-[10px]",
+                                        row.diff > 0
+                                          ? "bg-positive/10 text-positive"
+                                          : row.diff < 0
+                                            ? "bg-negative/10 text-negative"
+                                            : "bg-secondary text-muted-foreground"
+                                      )}
+                                    >
+                                      {row.diff > 0 ? "BUY" : row.diff < 0 ? "SELL" : "HOLD"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="border-b border-border px-4 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                        Trade Actions
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[760px]">
+                          <thead>
+                            <tr className="border-b border-border">
+                              {["Asset", "Side", "Current %", "Target %", "Notional", "Reason"].map((heading) => (
+                                <th
+                                  key={heading}
+                                  className="px-4 py-3 text-right text-[10px] font-mono uppercase tracking-wider text-muted-foreground first:text-left"
+                                >
+                                  {heading}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedRunExecutionPlan?.recommendedTrades.length ? (
+                              selectedRunExecutionPlan.recommendedTrades.map((trade, index) => (
+                                <tr key={`${trade.asset}-${trade.side}-${index}`} className="border-b border-border last:border-b-0">
+                                  <td className="px-4 py-3 text-left text-sm font-mono text-foreground">{trade.asset}</td>
+                                  <td
+                                    className={cn(
+                                      "px-4 py-3 text-right text-sm font-mono",
+                                      trade.side === "BUY" ? "text-positive" : "text-negative"
+                                    )}
+                                  >
+                                    {trade.side}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{trade.currentPercent.toFixed(2)}%</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{trade.targetPercent.toFixed(2)}%</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                    {formatNotional(trade.amountNotional, selectedRunBaseCurrency)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-xs font-mono text-muted-foreground">{trade.reason}</td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                                  No trade actions were generated for this event.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {selectedRun.inputSnapshot?.portfolio.assets?.length ? (
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        <div className="border-b border-border px-4 py-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                          Portfolio Snapshot Before Rebalance
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-[720px]">
+                            <thead>
+                              <tr className="border-b border-border">
+                                {["Asset", "Quantity", "Value", "Allocation"].map((heading) => (
+                                  <th
+                                    key={heading}
+                                    className="px-4 py-3 text-right text-[10px] font-mono uppercase tracking-wider text-muted-foreground first:text-left"
+                                  >
+                                    {heading}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedRun.inputSnapshot.portfolio.assets.map((asset) => (
+                                <tr key={`run-asset-${asset.symbol}`} className="border-b border-border last:border-b-0">
+                                  <td className="px-4 py-3 text-left text-sm font-mono text-foreground">{asset.symbol}</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                    {asset.quantity.toLocaleString(undefined, { maximumFractionDigits: 8 })}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                    {formatNotional(asset.value, selectedRunBaseCurrency)}
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{asset.allocation.toFixed(2)}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {selectedRun.warnings.length > 0 ? (
+                      <div className="rounded-lg border border-border bg-card p-4">
+                        <div className="mb-3 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Warnings</div>
+                        <div className="space-y-2">
+                          {selectedRun.warnings.map((warning, index) => (
+                            <div key={`${warning}-${index}`} className="rounded border border-border px-3 py-2 text-xs font-mono text-muted-foreground">
+                              {warning}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {profileModalOpen ? (

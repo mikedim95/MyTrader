@@ -8,10 +8,13 @@ import {
   StrategyCondition,
   StrategyCompositionMode,
   StrategyGuardConfig,
+  StrategyApprovalState,
   StrategyMarketContextConfig,
   StrategyMode,
+  StrategyRiskControls,
   StrategyRule,
   LEGACY_STRATEGY_MODES,
+  STRATEGY_APPROVAL_STATES,
   STRATEGY_MARKET_CONTEXT_INDICATORS,
   STRATEGY_MARKET_CONTEXT_PRICE_FILTERS,
   STRATEGY_ACTION_TYPES,
@@ -123,6 +126,16 @@ const marketContextConfigSchema = z
   })
   .optional();
 
+const riskControlsSchema = z
+  .object({
+    maxValidationDrawdownPct: z.number().finite().positive().max(100).optional(),
+    minValidationReturnPct: z.number().finite().min(-100).max(1000).optional(),
+    maxValidationTurnoverPct: z.number().finite().min(0).max(10_000).optional(),
+    requirePositiveValidationReturn: z.boolean().optional(),
+    requireTrainValidationSplit: z.boolean().optional(),
+  })
+  .default({});
+
 const strategyModeSchema = z.enum([...STRATEGY_MODES, ...LEGACY_STRATEGY_MODES] as const);
 
 export const strategyDslSchema = z.object({
@@ -147,6 +160,12 @@ export const strategyDslSchema = z.object({
   strategySelectionConfig: strategySelectionConfigSchema,
   weightAdjustmentConfig: weightAdjustmentConfigSchema,
   marketContextConfig: marketContextConfigSchema,
+  version: z.number().int().min(1).optional(),
+  lineageId: z.string().min(1).optional(),
+  approvalState: z.enum(STRATEGY_APPROVAL_STATES).optional(),
+  approvalUpdatedAt: z.string().datetime().optional(),
+  approvalNote: z.string().max(500).optional(),
+  riskControls: riskControlsSchema,
 });
 
 export type StrategyDslInput = z.infer<typeof strategyDslSchema>;
@@ -272,6 +291,23 @@ function normalizeMarketContextConfig(
     priceVsLongMaFilter,
     blockIfOverheated,
     indicatorConditions: indicatorConditions.length > 0 ? indicatorConditions : undefined,
+  };
+}
+
+function normalizeApprovalState(state: StrategyApprovalState | undefined): StrategyApprovalState {
+  if (state === "testing" || state === "paper" || state === "approved" || state === "rejected") {
+    return state;
+  }
+  return "draft";
+}
+
+function normalizeRiskControls(riskControls: StrategyRiskControls | undefined): StrategyRiskControls {
+  return {
+    maxValidationDrawdownPct: riskControls?.maxValidationDrawdownPct,
+    minValidationReturnPct: riskControls?.minValidationReturnPct,
+    maxValidationTurnoverPct: riskControls?.maxValidationTurnoverPct,
+    requirePositiveValidationReturn: riskControls?.requirePositiveValidationReturn ?? true,
+    requireTrainValidationSplit: riskControls?.requireTrainValidationSplit ?? true,
   };
 }
 
@@ -446,6 +482,12 @@ export function validateStrategyDsl(input: unknown, nowIso = new Date().toISOStr
       maxWeightPctPerStrategy: parsed.data.weightAdjustmentConfig.maxWeightPctPerStrategy,
     },
     marketContextConfig: normalizeMarketContextConfig(parsed.data.marketContextConfig),
+    version: parsed.data.version ?? 1,
+    lineageId: parsed.data.lineageId?.trim() || strategyId,
+    approvalState: normalizeApprovalState(parsed.data.approvalState),
+    approvalUpdatedAt: parsed.data.approvalUpdatedAt,
+    approvalNote: parsed.data.approvalNote?.trim() || undefined,
+    riskControls: normalizeRiskControls(parsed.data.riskControls),
     createdAt: nowIso,
     updatedAt: nowIso,
   };
@@ -457,11 +499,23 @@ export function validateStrategyDsl(input: unknown, nowIso = new Date().toISOStr
 }
 
 export function mergeStrategyUpdate(existing: StrategyConfig, input: unknown): DslValidationResult {
+  const currentVersion = Number.isInteger(existing.version) && existing.version > 0 ? existing.version : 1;
+  const currentApprovalState = normalizeApprovalState(existing.approvalState);
+  const approvalStateAfterEdit: StrategyApprovalState = currentApprovalState === "approved" ? "draft" : currentApprovalState;
   const combined = {
     ...existing,
     ...(typeof input === "object" && input !== null ? input : {}),
     id: existing.id,
     createdAt: existing.createdAt,
+    version: currentVersion + 1,
+    lineageId: existing.lineageId || existing.id,
+    approvalState: approvalStateAfterEdit,
+    approvalUpdatedAt: approvalStateAfterEdit !== currentApprovalState ? new Date().toISOString() : existing.approvalUpdatedAt,
+    approvalNote:
+      approvalStateAfterEdit !== currentApprovalState
+        ? "Strategy changed after approval and must be re-evaluated."
+        : existing.approvalNote,
+    latestEvaluationSummary: undefined,
   };
 
   const validated = validateStrategyDsl(combined, existing.createdAt);

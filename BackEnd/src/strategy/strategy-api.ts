@@ -31,6 +31,22 @@ const backtestRequestSchema = z.object({
   rebalanceCostsPct: z.number().finite().min(0).max(1).default(0.001),
   slippagePct: z.number().finite().min(0).max(1).default(0.001),
 });
+const candidateEvaluationRequestSchema = z.object({
+  startDate: isoOrDateSchema,
+  endDate: isoOrDateSchema,
+  initialCapital: z.number().finite().positive().default(10_000),
+  baseCurrency: z.string().min(1).default("USDC"),
+  validationDays: z.number().int().min(7).max(365).default(45),
+  rebalanceCostsPct: z.number().finite().min(0).max(1).default(0.001),
+  slippagePct: z.number().finite().min(0).max(1).default(0.001),
+});
+const backtestMarketPreviewSchema = z.object({
+  startDate: isoOrDateSchema,
+  endDate: isoOrDateSchema,
+  baseCurrency: z.string().min(1).default("USDC"),
+  timeframe: z.enum(["1h", "1d"]).default("1d"),
+  symbol: z.string().trim().min(1).default("BTC"),
+});
 
 const accountTypeSchema = z.enum(["real", "demo"]);
 const demoAccountBalanceSchema = z.object({
@@ -62,6 +78,10 @@ const rebalanceAllocationProfileSchema = z.object({
   executionPolicy: z.enum(["manual", "on_strategy_run", "interval"]).default("manual"),
   autoExecuteMinDriftPct: z.number().finite().min(0).max(100).optional(),
   scheduleInterval: z.string().regex(/^\d+(s|m|h|d)$/i).optional(),
+});
+const strategyApprovalUpdateSchema = z.object({
+  approvalState: z.enum(["draft", "testing", "paper", "approved", "rejected"]),
+  approvalNote: z.string().trim().max(500).optional(),
 });
 
 interface StrategyApiDeps {
@@ -151,6 +171,20 @@ async function validateRebalanceAllocationCapitalBudget(
   }
 
   return null;
+}
+
+function canMoveToApprovalState(
+  targetState: "draft" | "testing" | "paper" | "approved" | "rejected",
+  latestEvaluationPassed: boolean
+): { allowed: boolean; message?: string } {
+  if ((targetState === "paper" || targetState === "approved") && !latestEvaluationPassed) {
+    return {
+      allowed: false,
+      message: `Moving a strategy to ${targetState} requires a passing candidate evaluation.`,
+    };
+  }
+
+  return { allowed: true };
 }
 
 export function createStrategyRouter(deps: StrategyApiDeps): Router {
@@ -439,6 +473,7 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
         marketContext: state.evaluation.marketContext,
         marketGate: state.evaluation.marketGate,
         executionPlan: state.evaluation.executionPlan,
+        projectedOutcome: state.evaluation.projectedOutcome,
         traces: state.evaluation.traces,
         warnings: state.evaluation.warnings,
         composition: state.evaluation.composition,
@@ -519,6 +554,103 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
 
     await deps.repository.saveStrategy(merged.data, userScope);
     res.json({ strategy: merged.data });
+  });
+
+  router.get("/strategies/:id/versions", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const strategy = await deps.repository.getStrategy(req.params.id, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    const versions = await deps.repository.listStrategyVersions(req.params.id, userScope);
+    res.json({ strategy, versions });
+  });
+
+  router.get("/strategies/:id/evaluations", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const strategy = await deps.repository.getStrategy(req.params.id, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    const evaluations = await deps.repository.listStrategyEvaluations(req.params.id, userScope);
+    res.json({ strategy, evaluations });
+  });
+
+  router.post("/strategies/:id/evaluate-candidate", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const strategy = await deps.repository.getStrategy(req.params.id, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    const parsed = candidateEvaluationRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid candidate evaluation payload.", errors: parsed.error.issues });
+      return;
+    }
+
+    if (new Date(parsed.data.startDate) >= new Date(parsed.data.endDate)) {
+      res.status(400).json({ message: "startDate must be before endDate." });
+      return;
+    }
+
+    try {
+      const evaluation = await deps.backtestEngine.evaluateCandidateStrategy(
+        {
+          strategyId: strategy.id,
+          ...parsed.data,
+        },
+        userScope
+      );
+      const updatedStrategy = await deps.repository.getStrategy(strategy.id, userScope);
+      res.status(201).json({ strategy: updatedStrategy ?? strategy, evaluation });
+    } catch (error) {
+      res.status(400).json({
+        message: error instanceof Error ? error.message : "Unable to evaluate candidate strategy.",
+      });
+    }
+  });
+
+  router.post("/strategies/:id/approval", async (req, res) => {
+    const userScope = resolveStrategyUserScope(req);
+    const strategy = await deps.repository.getStrategy(req.params.id, userScope);
+    if (!strategy) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    const parsed = strategyApprovalUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid approval payload.", errors: parsed.error.issues });
+      return;
+    }
+
+    const permission = canMoveToApprovalState(
+      parsed.data.approvalState,
+      strategy.latestEvaluationSummary?.riskGatePassed === true
+    );
+    if (!permission.allowed) {
+      res.status(400).json({ message: permission.message ?? "Approval transition not allowed." });
+      return;
+    }
+
+    const updated = await deps.repository.updateStrategyApprovalState(
+      strategy.id,
+      parsed.data.approvalState,
+      parsed.data.approvalNote,
+      userScope
+    );
+    if (!updated) {
+      sendNotFound(res, "Strategy", req.params.id);
+      return;
+    }
+
+    res.json({ strategy: updated });
   });
 
   router.delete("/strategies/:id", async (req, res) => {
@@ -704,6 +836,33 @@ export function createStrategyRouter(deps: StrategyApiDeps): Router {
     const userScope = resolveStrategyUserScope(req);
     const backtests = await deps.repository.listBacktestRuns(100, userScope);
     res.json({ backtests });
+  });
+
+  router.get("/backtests/market-preview", async (req, res) => {
+    const parsed = backtestMarketPreviewSchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid backtest preview query.", errors: parsed.error.issues });
+      return;
+    }
+
+    const request = parsed.data;
+    if (new Date(request.startDate) >= new Date(request.endDate)) {
+      res.status(400).json({ message: "startDate must be before endDate." });
+      return;
+    }
+
+    try {
+      const history = await deps.backtestEngine.getMarketPreview(request);
+      res.json({
+        symbol: request.symbol.trim().toUpperCase(),
+        timeframe: request.timeframe,
+        startDate: request.startDate,
+        endDate: request.endDate,
+        history,
+      });
+    } catch (error) {
+      res.status(400).json({ message: error instanceof Error ? error.message : "Unable to load backtest preview." });
+    }
   });
 
   router.get("/backtests/:id", async (req, res) => {

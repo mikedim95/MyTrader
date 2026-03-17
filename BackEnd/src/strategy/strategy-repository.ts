@@ -10,10 +10,14 @@ import {
   DemoAccountSettings,
   ExecutionPlan,
   RebalanceAllocationProfile,
+  StrategyApprovalState,
+  StrategyCandidateEvaluationSummary,
   StrategyConfig,
+  StrategyRiskControls,
   StrategyRun,
   StrategyRunStatus,
   StrategyStoreData,
+  StrategyVersionRecord,
 } from "./types.js";
 import { buildPresetStrategies } from "./strategy-presets.js";
 import { createNextRunAt, normalizeAllocation } from "./allocation-utils.js";
@@ -27,6 +31,8 @@ const MAX_PERSISTED_STRATEGY_RUNS = 200;
 const MAX_PERSISTED_EXECUTION_PLANS = 200;
 const MAX_PERSISTED_BACKTEST_RUNS = 50;
 const MAX_PERSISTED_BACKTEST_STEPS = 500;
+const MAX_PERSISTED_STRATEGY_VERSIONS_PER_STRATEGY = 25;
+const MAX_PERSISTED_STRATEGY_EVALUATIONS_PER_STRATEGY = 20;
 const DUMMY_USERS = [
   {
     userId: 1,
@@ -180,8 +186,44 @@ function createDefaultDemoAccountSettings(): DemoAccountSettings {
   };
 }
 
+function normalizeStrategyApprovalState(value: unknown): StrategyApprovalState {
+  if (value === "testing" || value === "paper" || value === "approved" || value === "rejected") {
+    return value;
+  }
+  return "draft";
+}
+
+function normalizeStrategyRiskControls(entry: unknown): StrategyRiskControls {
+  if (!entry || typeof entry !== "object") {
+    return {
+      requirePositiveValidationReturn: true,
+      requireTrainValidationSplit: true,
+    };
+  }
+
+  const shape = entry as Partial<StrategyRiskControls>;
+  return {
+    maxValidationDrawdownPct:
+      typeof shape.maxValidationDrawdownPct === "number" && Number.isFinite(shape.maxValidationDrawdownPct)
+        ? shape.maxValidationDrawdownPct
+        : undefined,
+    minValidationReturnPct:
+      typeof shape.minValidationReturnPct === "number" && Number.isFinite(shape.minValidationReturnPct)
+        ? shape.minValidationReturnPct
+        : undefined,
+    maxValidationTurnoverPct:
+      typeof shape.maxValidationTurnoverPct === "number" && Number.isFinite(shape.maxValidationTurnoverPct)
+        ? shape.maxValidationTurnoverPct
+        : undefined,
+    requirePositiveValidationReturn: shape.requirePositiveValidationReturn !== false,
+    requireTrainValidationSplit: shape.requireTrainValidationSplit !== false,
+  };
+}
+
 const DEFAULT_STORE: StrategyStoreData = {
   strategies: [],
+  strategyVersions: [],
+  strategyEvaluations: [],
   rebalanceAllocationProfiles: [],
   strategyRuns: [],
   executionPlans: [],
@@ -368,9 +410,112 @@ function normalizeRebalanceAllocationProfile(entry: unknown): RebalanceAllocatio
   };
 }
 
+function normalizeStrategyEvaluationSummary(entry: unknown): StrategyCandidateEvaluationSummary | null {
+  if (!entry || typeof entry !== "object") return null;
+
+  const shape = entry as Partial<StrategyCandidateEvaluationSummary>;
+  if (
+    typeof shape.id !== "string" ||
+    typeof shape.strategyId !== "string" ||
+    !Number.isInteger(shape.strategyVersion) ||
+    typeof shape.createdAt !== "string" ||
+    !shape.trainWindow ||
+    !shape.validationWindow ||
+    typeof shape.trainBacktestRunId !== "string" ||
+    typeof shape.validationBacktestRunId !== "string" ||
+    !shape.trainMetrics ||
+    !shape.validationMetrics
+  ) {
+    return null;
+  }
+
+  return {
+    ...(shape as StrategyCandidateEvaluationSummary),
+    riskChecks: Array.isArray(shape.riskChecks) ? shape.riskChecks : [],
+    riskGatePassed: shape.riskGatePassed === true,
+    recommendedApprovalState: normalizeStrategyApprovalState(shape.recommendedApprovalState),
+    notes: Array.isArray(shape.notes) ? shape.notes.filter((note): note is string => typeof note === "string") : [],
+  };
+}
+
+function normalizeStrategyConfig(
+  entry: unknown,
+  options?: { stripLatestEvaluationSummary?: boolean }
+): StrategyConfig | null {
+  if (!entry || typeof entry !== "object") return null;
+
+  const shape = entry as Partial<StrategyConfig>;
+  if (
+    typeof shape.id !== "string" ||
+    shape.id.trim().length === 0 ||
+    typeof shape.name !== "string" ||
+    shape.name.trim().length === 0 ||
+    typeof shape.createdAt !== "string" ||
+    typeof shape.updatedAt !== "string" ||
+    !shape.baseAllocation ||
+    !Array.isArray(shape.rules) ||
+    !shape.guards ||
+    typeof shape.executionMode !== "string" ||
+    typeof shape.scheduleInterval !== "string"
+  ) {
+    return null;
+  }
+
+  const version = Number.isInteger(shape.version) && (shape.version ?? 0) > 0 ? (shape.version as number) : 1;
+
+  return {
+    ...(shape as StrategyConfig),
+    version,
+    lineageId: typeof shape.lineageId === "string" && shape.lineageId.trim().length > 0 ? shape.lineageId.trim() : shape.id,
+    approvalState: normalizeStrategyApprovalState(shape.approvalState),
+    approvalUpdatedAt:
+      typeof shape.approvalUpdatedAt === "string" && shape.approvalUpdatedAt.trim().length > 0
+        ? shape.approvalUpdatedAt
+        : shape.updatedAt,
+    approvalNote:
+      typeof shape.approvalNote === "string" && shape.approvalNote.trim().length > 0 ? shape.approvalNote.trim() : undefined,
+    riskControls: normalizeStrategyRiskControls(shape.riskControls),
+    latestEvaluationSummary: options?.stripLatestEvaluationSummary
+      ? undefined
+      : normalizeStrategyEvaluationSummary(shape.latestEvaluationSummary) ?? undefined,
+  };
+}
+
+function normalizeStrategyVersionRecord(entry: unknown): StrategyVersionRecord | null {
+  if (!entry || typeof entry !== "object") return null;
+
+  const shape = entry as Partial<StrategyVersionRecord>;
+  if (
+    typeof shape.id !== "string" ||
+    typeof shape.strategyId !== "string" ||
+    !Number.isInteger(shape.version) ||
+    typeof shape.createdAt !== "string" ||
+    !shape.strategySnapshot
+  ) {
+    return null;
+  }
+
+  const strategySnapshot = normalizeStrategyConfig(shape.strategySnapshot, { stripLatestEvaluationSummary: true });
+  if (!strategySnapshot) return null;
+
+  return {
+    id: shape.id,
+    strategyId: shape.strategyId,
+    version: shape.version as number,
+    createdAt: shape.createdAt,
+    approvalState: normalizeStrategyApprovalState(shape.approvalState),
+    strategySnapshot,
+  };
+}
+
 function cloneStore(store: StrategyStoreData): StrategyStoreData {
   return {
-    strategies: [...store.strategies],
+    strategies: store.strategies.map((strategy) => ({ ...strategy })),
+    strategyVersions: store.strategyVersions.map((entry) => ({
+      ...entry,
+      strategySnapshot: { ...entry.strategySnapshot },
+    })),
+    strategyEvaluations: store.strategyEvaluations.map((entry) => ({ ...entry })),
     rebalanceAllocationProfiles: store.rebalanceAllocationProfiles.map((profile) => ({
       ...profile,
       allocation: { ...profile.allocation },
@@ -391,7 +536,21 @@ function parseStore(raw: string): StrategyStoreData {
   try {
     const parsed = JSON.parse(raw) as Partial<StrategyStoreData>;
     return {
-      strategies: Array.isArray(parsed.strategies) ? parsed.strategies : [],
+      strategies: Array.isArray(parsed.strategies)
+        ? parsed.strategies
+            .map((item) => normalizeStrategyConfig(item))
+            .filter((item): item is StrategyConfig => item !== null)
+        : [],
+      strategyVersions: Array.isArray((parsed as { strategyVersions?: unknown[] }).strategyVersions)
+        ? (parsed as { strategyVersions: unknown[] }).strategyVersions
+            .map((item) => normalizeStrategyVersionRecord(item))
+            .filter((item): item is StrategyVersionRecord => item !== null)
+        : [],
+      strategyEvaluations: Array.isArray((parsed as { strategyEvaluations?: unknown[] }).strategyEvaluations)
+        ? (parsed as { strategyEvaluations: unknown[] }).strategyEvaluations
+            .map((item) => normalizeStrategyEvaluationSummary(item))
+            .filter((item): item is StrategyCandidateEvaluationSummary => item !== null)
+        : [],
       rebalanceAllocationProfiles: Array.isArray((parsed as { rebalanceAllocationProfiles?: unknown[] }).rebalanceAllocationProfiles)
         ? (parsed as { rebalanceAllocationProfiles: unknown[] }).rebalanceAllocationProfiles
             .map((item) => normalizeRebalanceAllocationProfile(item))
@@ -416,10 +575,10 @@ function parseStore(raw: string): StrategyStoreData {
   }
 }
 
-function orderByIsoDescending<T extends { createdAt?: string; startedAt?: string; timestamp?: string }>(entries: T[]): T[] {
+function orderByIsoDescending<T extends { createdAt?: string; updatedAt?: string; startedAt?: string; timestamp?: string }>(entries: T[]): T[] {
   return [...entries].sort((left, right) => {
-    const leftTs = left.createdAt ?? left.startedAt ?? left.timestamp ?? "";
-    const rightTs = right.createdAt ?? right.startedAt ?? right.timestamp ?? "";
+    const leftTs = left.updatedAt ?? left.createdAt ?? left.startedAt ?? left.timestamp ?? "";
+    const rightTs = right.updatedAt ?? right.createdAt ?? right.startedAt ?? right.timestamp ?? "";
     return rightTs.localeCompare(leftTs);
   });
 }
@@ -427,9 +586,27 @@ function orderByIsoDescending<T extends { createdAt?: string; startedAt?: string
 function pruneStoreForPersistence(store: StrategyStoreData): StrategyStoreData {
   const recentBacktestRuns = orderByIsoDescending(store.backtestRuns).slice(0, MAX_PERSISTED_BACKTEST_RUNS);
   const recentBacktestRunIds = new Set(recentBacktestRuns.map((run) => run.id));
+  const versionEntries = orderByIsoDescending(store.strategyVersions);
+  const evaluationEntries = orderByIsoDescending(store.strategyEvaluations);
+
+  const versionCounts = new Map<string, number>();
+  const retainedVersions = versionEntries.filter((entry) => {
+    const nextCount = (versionCounts.get(entry.strategyId) ?? 0) + 1;
+    versionCounts.set(entry.strategyId, nextCount);
+    return nextCount <= MAX_PERSISTED_STRATEGY_VERSIONS_PER_STRATEGY;
+  });
+
+  const evaluationCounts = new Map<string, number>();
+  const retainedEvaluations = evaluationEntries.filter((entry) => {
+    const nextCount = (evaluationCounts.get(entry.strategyId) ?? 0) + 1;
+    evaluationCounts.set(entry.strategyId, nextCount);
+    return nextCount <= MAX_PERSISTED_STRATEGY_EVALUATIONS_PER_STRATEGY;
+  });
 
   return {
     ...store,
+    strategyVersions: retainedVersions,
+    strategyEvaluations: retainedEvaluations,
     strategyRuns: orderByIsoDescending(store.strategyRuns).slice(0, MAX_PERSISTED_STRATEGY_RUNS),
     executionPlans: orderByIsoDescending(store.executionPlans).slice(0, MAX_PERSISTED_EXECUTION_PLANS),
     backtestRuns: recentBacktestRuns,
@@ -437,6 +614,28 @@ function pruneStoreForPersistence(store: StrategyStoreData): StrategyStoreData {
       store.backtestSteps.filter((step) => recentBacktestRunIds.has(step.backtestRunId))
     ).slice(0, MAX_PERSISTED_BACKTEST_STEPS),
   };
+}
+
+function buildStrategyVersionRecord(strategy: StrategyConfig): StrategyVersionRecord {
+  return {
+    id: randomUUID(),
+    strategyId: strategy.id,
+    version: strategy.version,
+    createdAt: strategy.updatedAt,
+    approvalState: strategy.approvalState,
+    strategySnapshot: {
+      ...strategy,
+      latestEvaluationSummary: undefined,
+    },
+  };
+}
+
+function ensureStrategyVersionRecorded(store: StrategyStoreData, strategy: StrategyConfig): void {
+  const exists = store.strategyVersions.some(
+    (entry) => entry.strategyId === strategy.id && entry.version === strategy.version
+  );
+  if (exists) return;
+  store.strategyVersions.push(buildStrategyVersionRecord(strategy));
 }
 
 interface StoreRow extends RowDataPacket {
@@ -870,6 +1069,10 @@ export class StrategyRepository {
       }
     }
 
+    store.strategies = store.strategies
+      .map((strategy) => normalizeStrategyConfig(strategy))
+      .filter((strategy): strategy is StrategyConfig => strategy !== null);
+    store.strategies.forEach((strategy) => ensureStrategyVersionRecorded(store, strategy));
     store.demoAccount = normalizeDemoAccountSettings(store.demoAccount);
     await this.writeStoreForUser(conn, userId, store);
     this.bootstrappedUserIds.add(userId);
@@ -1020,6 +1223,10 @@ export class StrategyRepository {
       }
     }
 
+    store.strategies = store.strategies
+      .map((strategy) => normalizeStrategyConfig(strategy))
+      .filter((strategy): strategy is StrategyConfig => strategy !== null);
+    store.strategies.forEach((strategy) => ensureStrategyVersionRecorded(store, strategy));
     store.demoAccount = normalizeDemoAccountSettings(store.demoAccount);
     await this.writeOfflineStore(user.username, store);
     this.bootstrappedUserIds.add(user.userId);
@@ -1039,6 +1246,7 @@ export class StrategyRepository {
 
     for (const scope of await this.listUserScopes()) {
       await this.markInterruptedRunsAsFailed(scope);
+      await this.markInterruptedBacktestRunsAsFailed(scope);
     }
   }
 
@@ -1062,6 +1270,7 @@ export class StrategyRepository {
         const scopes = await this.listUserScopes();
         for (const scope of scopes) {
           await this.markInterruptedRunsAsFailed(scope);
+          await this.markInterruptedBacktestRunsAsFailed(scope);
         }
         return;
       } catch (error) {
@@ -1157,6 +1366,21 @@ export class StrategyRepository {
     });
   }
 
+  async markInterruptedBacktestRunsAsFailed(scope?: StrategyUserScope): Promise<void> {
+    await this.mutate(scope, (store) => {
+      const nowIso = new Date().toISOString();
+      store.backtestRuns = store.backtestRuns.map((run) => {
+        if (run.status !== "running" && run.status !== "pending") return run;
+        return {
+          ...run,
+          status: "failed",
+          completedAt: nowIso,
+          error: "Interrupted by process restart.",
+        };
+      });
+    });
+  }
+
   async listUserScopes(): Promise<StrategyUserScope[]> {
     await this.init();
 
@@ -1177,23 +1401,104 @@ export class StrategyRepository {
   }
 
   async listStrategies(scope?: StrategyUserScope): Promise<StrategyConfig[]> {
-    return this.readAfterWrites(scope, (store) => orderByIsoDescending(store.strategies));
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.strategies)
+        .map((strategy) => normalizeStrategyConfig(strategy))
+        .filter((strategy): strategy is StrategyConfig => strategy !== null)
+    );
   }
 
   async getStrategy(strategyId: string, scope?: StrategyUserScope): Promise<StrategyConfig | null> {
-    return this.readAfterWrites(scope, (store) => store.strategies.find((strategy) => strategy.id === strategyId) ?? null);
+    return this.readAfterWrites(scope, (store) => {
+      const strategy = store.strategies.find((item) => item.id === strategyId);
+      return normalizeStrategyConfig(strategy) ?? null;
+    });
   }
 
   async saveStrategy(strategy: StrategyConfig, scope?: StrategyUserScope): Promise<StrategyConfig> {
     return this.mutate(scope, (store) => {
-      const index = store.strategies.findIndex((item) => item.id === strategy.id);
-      if (index >= 0) {
-        store.strategies[index] = strategy;
-      } else {
-        store.strategies.push(strategy);
+      const normalizedStrategy = normalizeStrategyConfig(strategy);
+      if (!normalizedStrategy) {
+        throw new Error("Invalid strategy payload.");
       }
 
-      return strategy;
+      const index = store.strategies.findIndex((item) => item.id === normalizedStrategy.id);
+      if (index >= 0) {
+        store.strategies[index] = normalizedStrategy;
+      } else {
+        store.strategies.push(normalizedStrategy);
+      }
+
+      ensureStrategyVersionRecorded(store, normalizedStrategy);
+      return normalizedStrategy;
+    });
+  }
+
+  async listStrategyVersions(strategyId: string, scope?: StrategyUserScope): Promise<StrategyVersionRecord[]> {
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.strategyVersions)
+        .filter((entry) => entry.strategyId === strategyId)
+        .map((entry) => ({
+          ...entry,
+          strategySnapshot: { ...entry.strategySnapshot },
+        }))
+    );
+  }
+
+  async listStrategyEvaluations(
+    strategyId: string,
+    scope?: StrategyUserScope
+  ): Promise<StrategyCandidateEvaluationSummary[]> {
+    return this.readAfterWrites(scope, (store) =>
+      orderByIsoDescending(store.strategyEvaluations)
+        .filter((entry) => entry.strategyId === strategyId)
+        .map((entry) => ({ ...entry }))
+    );
+  }
+
+  async saveStrategyEvaluation(
+    evaluation: StrategyCandidateEvaluationSummary,
+    scope?: StrategyUserScope
+  ): Promise<StrategyCandidateEvaluationSummary> {
+    return this.mutate(scope, (store) => {
+      const normalizedEvaluation = normalizeStrategyEvaluationSummary(evaluation);
+      if (!normalizedEvaluation) {
+        throw new Error("Invalid strategy evaluation payload.");
+      }
+
+      const index = store.strategyEvaluations.findIndex((entry) => entry.id === normalizedEvaluation.id);
+      if (index >= 0) {
+        store.strategyEvaluations[index] = normalizedEvaluation;
+      } else {
+        store.strategyEvaluations.push(normalizedEvaluation);
+      }
+
+      const strategy = store.strategies.find((entry) => entry.id === normalizedEvaluation.strategyId);
+      if (strategy) {
+        strategy.latestEvaluationSummary = normalizedEvaluation;
+        strategy.updatedAt = normalizedEvaluation.createdAt;
+      }
+
+      return normalizedEvaluation;
+    });
+  }
+
+  async updateStrategyApprovalState(
+    strategyId: string,
+    approvalState: StrategyApprovalState,
+    approvalNote: string | undefined,
+    scope?: StrategyUserScope
+  ): Promise<StrategyConfig | null> {
+    return this.mutate(scope, (store) => {
+      const strategy = store.strategies.find((entry) => entry.id === strategyId);
+      if (!strategy) return null;
+
+      const nowIso = new Date().toISOString();
+      strategy.approvalState = approvalState;
+      strategy.approvalUpdatedAt = nowIso;
+      strategy.approvalNote = approvalNote?.trim() ? approvalNote.trim() : undefined;
+      strategy.updatedAt = nowIso;
+      return normalizeStrategyConfig(strategy);
     });
   }
 
@@ -1208,6 +1513,8 @@ export class StrategyRepository {
 
       store.strategyRuns = store.strategyRuns.filter((run) => run.strategyId !== strategyId);
       store.executionPlans = store.executionPlans.filter((plan) => plan.strategyId !== strategyId);
+      store.strategyVersions = store.strategyVersions.filter((entry) => entry.strategyId !== strategyId);
+      store.strategyEvaluations = store.strategyEvaluations.filter((entry) => entry.strategyId !== strategyId);
 
       const removedBacktestRunIds = new Set(
         store.backtestRuns.filter((run) => run.strategyId === strategyId).map((run) => run.id)
@@ -1390,6 +1697,9 @@ export class StrategyRepository {
       if (!profile) return null;
       profile.lastEvaluatedAt = evaluatedAtIso;
       profile.updatedAt = evaluatedAtIso;
+      if (profile.executionPolicy === "interval" && profile.scheduleInterval) {
+        profile.nextExecutionAt = createNextRunAt(evaluatedAtIso, profile.scheduleInterval);
+      }
       return {
         ...profile,
         allocation: { ...profile.allocation },

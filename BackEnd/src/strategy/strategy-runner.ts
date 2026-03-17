@@ -14,8 +14,19 @@ import {
   StrategyConfig,
   StrategyEvaluationResult,
   StrategyMarketContextSnapshot,
+  StrategyProjectedHolding,
   StrategyRun,
 } from "./types.js";
+
+const LIVE_APPROVAL_REQUIRED = String(process.env.STRATEGY_REQUIRE_APPROVAL_FOR_REAL_RUNS ?? "true").toLowerCase() !== "false";
+const GLOBAL_KILL_SWITCH_ENABLED = ["1", "true", "yes", "on"].includes(
+  String(process.env.STRATEGY_GLOBAL_KILL_SWITCH ?? "false").toLowerCase()
+);
+
+function round(value: number, digits = 4): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
 
 export class StrategyRunner {
   private readonly activeStrategies = new Set<string>();
@@ -80,6 +91,67 @@ export class StrategyRunner {
         rebalanceAllocationName: profile.name,
       },
     };
+  }
+
+  private buildProjectedOutcome(
+    portfolio: PortfolioState,
+    evaluation: StrategyEvaluationResult,
+    accountType: PortfolioAccountType
+  ): StrategyEvaluationResult["projectedOutcome"] {
+    const assetsBySymbol = new Map(portfolio.assets.map((asset) => [asset.symbol.toUpperCase(), asset]));
+    const universe = Array.from(
+      new Set([
+        ...Object.keys(portfolio.allocation).map((symbol) => symbol.toUpperCase()),
+        ...Object.keys(evaluation.adjustedTargetAllocation).map((symbol) => symbol.toUpperCase()),
+      ])
+    ).sort((left, right) => left.localeCompare(right));
+
+    const holdings: StrategyProjectedHolding[] = universe.map((symbol) => {
+      const asset = assetsBySymbol.get(symbol);
+      const currentPercent = portfolio.allocation[symbol] ?? 0;
+      const targetPercent = evaluation.adjustedTargetAllocation[symbol] ?? 0;
+      const currentValue = asset?.value ?? (currentPercent / 100) * portfolio.totalValue;
+      const targetValue = (targetPercent / 100) * portfolio.totalValue;
+      const currentPrice = asset?.price ?? (symbol === portfolio.baseCurrency.toUpperCase() ? 1 : 0);
+      const currentQuantity = asset?.quantity ?? (currentPrice > 0 ? currentValue / currentPrice : 0);
+      const targetQuantity = currentPrice > 0 ? targetValue / currentPrice : 0;
+
+      return {
+        symbol,
+        currentPercent: round(currentPercent, 4),
+        targetPercent: round(targetPercent, 4),
+        currentValue: round(currentValue, 2),
+        targetValue: round(targetValue, 2),
+        currentQuantity: round(currentQuantity, 8),
+        targetQuantity: round(targetQuantity, 8),
+        deltaValue: round(targetValue - currentValue, 2),
+      };
+    });
+
+    return {
+      generatedAt: evaluation.evaluatedAt,
+      accountType,
+      baseCurrency: portfolio.baseCurrency,
+      portfolioValue: round(portfolio.totalValue, 2),
+      driftPct: round(evaluation.executionPlan.driftPct, 4),
+      estimatedTurnoverPct: round(evaluation.executionPlan.estimatedTurnoverPct, 4),
+      projectedAllocation: { ...evaluation.adjustedTargetAllocation },
+      holdings,
+    };
+  }
+
+  private getLiveRiskBlockReason(strategy: StrategyConfig, accountType: PortfolioAccountType): string | null {
+    if (accountType !== "real") return null;
+    if (GLOBAL_KILL_SWITCH_ENABLED) {
+      return "Real-account strategy execution is blocked because the global strategy kill switch is enabled.";
+    }
+    if (LIVE_APPROVAL_REQUIRED && strategy.approvalState !== "approved") {
+      return `Real-account strategy execution requires approval. Current state: ${strategy.approvalState}.`;
+    }
+    if (LIVE_APPROVAL_REQUIRED && strategy.latestEvaluationSummary?.riskGatePassed !== true) {
+      return "Real-account strategy execution requires a passing candidate evaluation with risk checks.";
+    }
+    return null;
   }
 
   private async evaluateResolvedStrategy(
@@ -163,6 +235,7 @@ export class StrategyRunner {
       accountType,
       userScope
     );
+    evaluation.projectedOutcome = this.buildProjectedOutcome(portfolio, evaluation, accountType);
 
     return {
       strategy,
@@ -205,6 +278,7 @@ export class StrategyRunner {
       demoAccount: this.createProfileDemoSettings(profile),
       baseCurrency: profile.baseCurrency,
     });
+    prepared.evaluation.projectedOutcome = this.buildProjectedOutcome(prepared.portfolio, prepared.evaluation, "demo");
 
     return {
       profile,
@@ -246,6 +320,26 @@ export class StrategyRunner {
     const strategy = await this.repository.getStrategy(strategyId, userScope);
     if (!strategy) {
       throw new Error(`Strategy ${strategyId} was not found.`);
+    }
+
+    const liveRiskBlockReason = this.getLiveRiskBlockReason(strategy, accountType);
+    if (liveRiskBlockReason) {
+      const skipped = await this.repository.createStrategyRun(
+        {
+          strategyId,
+          status: "skipped",
+          accountType,
+          mode: strategy.executionMode,
+          trigger,
+          warnings: [liveRiskBlockReason],
+          skipReason: liveRiskBlockReason,
+        },
+        userScope
+      );
+      if (trigger === "schedule") {
+        await this.repository.updateStrategyRunTimestamps(strategy.id, new Date().toISOString(), userScope);
+      }
+      return skipped;
     }
 
     const runKey = this.runKey(strategyId, accountType, userScope);
@@ -294,6 +388,7 @@ export class StrategyRunner {
         accountType,
         userScope
       );
+      evaluation.projectedOutcome = this.buildProjectedOutcome(portfolio, evaluation, accountType);
 
       run = (await this.repository.updateStrategyRun(
         run.id,
@@ -310,11 +405,12 @@ export class StrategyRunner {
       await this.repository.saveExecutionPlan(evaluation.executionPlan, userScope);
 
       if (evaluation.marketGate && !evaluation.marketGate.passed) {
+        const completedAt = new Date().toISOString();
         const skipped = await this.repository.updateStrategyRun(
           run.id,
           {
             status: "skipped",
-            completedAt: new Date().toISOString(),
+            completedAt,
             accountType,
             adjustedAllocation: evaluation.adjustedTargetAllocation,
             executionPlanId: evaluation.executionPlan.id,
@@ -324,6 +420,10 @@ export class StrategyRunner {
           },
           userScope
         );
+
+        if (trigger === "schedule") {
+          await this.repository.updateStrategyRunTimestamps(strategy.id, completedAt, userScope);
+        }
 
         return skipped ?? run;
       }
@@ -408,6 +508,7 @@ export class StrategyRunner {
         accountType,
         userScope
       );
+      evaluation.projectedOutcome = this.buildProjectedOutcome(portfolio, evaluation, accountType);
 
       run = (await this.repository.updateStrategyRun(
         run.id,
@@ -444,8 +545,9 @@ export class StrategyRunner {
 
       const completedAt = new Date().toISOString();
       const executionWarnings = [...evaluation.warnings];
+      const shouldForceManualRebalance = trigger === "api" && evaluation.executionPlan.driftPct > 0;
 
-      if (!evaluation.executionPlan.rebalanceRequired) {
+      if (!evaluation.executionPlan.rebalanceRequired && !shouldForceManualRebalance) {
         executionWarnings.push("No rebalance was required. Demo holdings were left unchanged.");
       } else {
         if (!Number.isFinite(portfolio.totalValue) || portfolio.totalValue <= 0) {
@@ -459,7 +561,11 @@ export class StrategyRunner {
         );
 
         await this.repository.setDemoAccountHoldings(nextHoldings, userScope);
-        executionWarnings.push("Demo rebalance executed at current market prices.");
+        executionWarnings.push(
+          shouldForceManualRebalance && !evaluation.executionPlan.rebalanceRequired
+            ? "Manual execution executed the demo rebalance to the exact target allocation at current market prices."
+            : "Demo rebalance executed at current market prices."
+        );
       }
 
       const completed = await this.repository.updateStrategyRun(
@@ -511,7 +617,7 @@ export class StrategyRunner {
       throw new Error(`Strategy ${profile.strategyId} linked to allocation ${profile.name} was not found.`);
     }
     if (!strategy.isEnabled) {
-      return this.repository.createStrategyRun(
+      const skipped = await this.repository.createStrategyRun(
         {
           strategyId: profile.strategyId,
           rebalanceAllocationId: profile.id,
@@ -525,6 +631,10 @@ export class StrategyRunner {
         },
         userScope
       );
+      if (trigger === "schedule") {
+        await this.repository.markRebalanceAllocationProfileEvaluated(profile.id, new Date().toISOString(), userScope);
+      }
+      return skipped;
     }
 
     const runKey = this.runKey(strategy.id, "demo", userScope, profile.id);
@@ -564,6 +674,7 @@ export class StrategyRunner {
         demoAccount: this.createProfileDemoSettings(profile),
         baseCurrency: profile.baseCurrency,
       });
+      evaluation.projectedOutcome = this.buildProjectedOutcome(portfolio, evaluation, "demo");
       const evaluationWithProfile = this.attachProfileToEvaluation(evaluation, profile);
       const evaluatedAt = new Date().toISOString();
 
@@ -632,8 +743,10 @@ export class StrategyRunner {
 
       const completedAt = new Date().toISOString();
       const executionWarnings = [...evaluationWithProfile.warnings];
+      const shouldForceManualRebalance =
+        trigger === "api" && evaluationWithProfile.executionPlan.driftPct > 0;
 
-      if (!evaluationWithProfile.executionPlan.rebalanceRequired) {
+      if (!evaluationWithProfile.executionPlan.rebalanceRequired && !shouldForceManualRebalance) {
         executionWarnings.push("No rebalance was required. Allocation holdings were left unchanged.");
       } else {
         if (!Number.isFinite(portfolio.totalValue) || portfolio.totalValue <= 0) {
@@ -647,7 +760,11 @@ export class StrategyRunner {
         );
 
         await this.repository.applyRebalanceAllocationProfileExecution(profile.id, nextHoldings, completedAt, userScope);
-        executionWarnings.push("Allocation rebalance executed at current market prices.");
+        executionWarnings.push(
+          shouldForceManualRebalance && !evaluationWithProfile.executionPlan.rebalanceRequired
+            ? "Manual execution executed the allocation rebalance to the exact target allocation at current market prices."
+            : "Allocation rebalance executed at current market prices."
+        );
       }
 
       const completed = await this.repository.updateStrategyRun(

@@ -402,6 +402,7 @@ export type StrategyActionType =
 export type PortfolioAccountType = "real" | "demo";
 export type StrategyRunStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type BacktestRunStatus = "pending" | "running" | "completed" | "failed";
+export type StrategyApprovalState = "draft" | "testing" | "paper" | "approved" | "rejected";
 
 export interface DemoAccountHolding {
   symbol: string;
@@ -500,6 +501,14 @@ export interface StrategyMetadata {
   expectedTurnover?: "low" | "medium" | "high";
   stablecoinExposure?: "low" | "medium" | "high";
   tags?: string[];
+}
+
+export interface StrategyRiskControls {
+  maxValidationDrawdownPct?: number;
+  minValidationReturnPct?: number;
+  maxValidationTurnoverPct?: number;
+  requirePositiveValidationReturn?: boolean;
+  requireTrainValidationSplit?: boolean;
 }
 
 export interface StrategySelectionConfig {
@@ -606,6 +615,13 @@ export interface StrategyConfig {
   strategySelectionConfig?: StrategySelectionConfig;
   weightAdjustmentConfig?: StrategyWeightAdjustmentConfig;
   marketContextConfig?: StrategyMarketContextConfig;
+  version: number;
+  lineageId: string;
+  approvalState: StrategyApprovalState;
+  approvalUpdatedAt?: string;
+  approvalNote?: string;
+  riskControls?: StrategyRiskControls;
+  latestEvaluationSummary?: StrategyCandidateEvaluationSummary;
   createdAt: string;
   updatedAt: string;
 }
@@ -704,6 +720,7 @@ export interface StrategyStateResponse {
   marketContext?: StrategyMarketContextSnapshot;
   marketGate?: StrategyMarketGateResult;
   executionPlan: ExecutionPlan;
+  projectedOutcome?: StrategyProjectedOutcome;
   traces: RuleEvaluationTrace[];
   warnings: string[];
   composition?: {
@@ -757,6 +774,68 @@ export interface BacktestMetrics {
   averageStablecoinAllocationPct: number;
 }
 
+export interface StrategyProjectedHolding {
+  symbol: string;
+  currentPercent: number;
+  targetPercent: number;
+  currentValue: number;
+  targetValue: number;
+  currentQuantity: number;
+  targetQuantity: number;
+  deltaValue: number;
+}
+
+export interface StrategyProjectedOutcome {
+  generatedAt: string;
+  accountType: PortfolioAccountType;
+  baseCurrency: string;
+  portfolioValue: number;
+  driftPct: number;
+  estimatedTurnoverPct: number;
+  projectedAllocation: AllocationMap;
+  holdings: StrategyProjectedHolding[];
+}
+
+export interface StrategyEvaluationWindow {
+  startDate: string;
+  endDate: string;
+  timeframe: "1h" | "1d";
+}
+
+export interface StrategyRiskCheckResult {
+  name: string;
+  passed: boolean;
+  actualValue?: number;
+  threshold?: number;
+  message: string;
+}
+
+export interface StrategyCandidateEvaluationSummary {
+  id: string;
+  strategyId: string;
+  strategyVersion: number;
+  createdAt: string;
+  trainWindow: StrategyEvaluationWindow;
+  validationWindow: StrategyEvaluationWindow;
+  trainBacktestRunId: string;
+  validationBacktestRunId: string;
+  trainMetrics: BacktestMetrics;
+  validationMetrics: BacktestMetrics;
+  riskChecks: StrategyRiskCheckResult[];
+  riskGatePassed: boolean;
+  recommendedApprovalState: StrategyApprovalState;
+  notes: string[];
+}
+
+export interface StrategyVersionRecord {
+  id: string;
+  strategyId: string;
+  version: number;
+  createdAt: string;
+  approvalState: StrategyApprovalState;
+  strategySnapshot: StrategyConfig;
+}
+
 export interface BacktestTimelinePoint {
   timestamp: string;
   portfolioValue: number;
@@ -771,6 +850,21 @@ export interface StrategiesResponse {
 
 export interface StrategyResponse {
   strategy: StrategyConfig;
+}
+
+export interface StrategyVersionsResponse {
+  strategy: StrategyConfig;
+  versions: StrategyVersionRecord[];
+}
+
+export interface StrategyEvaluationsResponse {
+  strategy: StrategyConfig;
+  evaluations: StrategyCandidateEvaluationSummary[];
+}
+
+export interface StrategyEvaluationResponse {
+  strategy: StrategyConfig;
+  evaluation: StrategyCandidateEvaluationSummary;
 }
 
 export interface StrategyRunsResponse {
@@ -818,6 +912,27 @@ export interface BacktestMetricsResponse {
   metrics: BacktestMetrics;
 }
 
+export interface BacktestMarketPreviewPoint {
+  timestamp: string;
+  price: number;
+}
+
+export interface BacktestMarketPreviewRequest {
+  startDate: string;
+  endDate: string;
+  baseCurrency?: string;
+  timeframe?: "1h" | "1d";
+  symbol?: string;
+}
+
+export interface BacktestMarketPreviewResponse {
+  symbol: string;
+  timeframe: "1h" | "1d";
+  startDate: string;
+  endDate: string;
+  history: BacktestMarketPreviewPoint[];
+}
+
 export interface BacktestCreateRequest {
   strategyId: string;
   startDate: string;
@@ -825,6 +940,16 @@ export interface BacktestCreateRequest {
   initialCapital: number;
   baseCurrency: string;
   timeframe: "1h" | "1d";
+  rebalanceCostsPct: number;
+  slippagePct: number;
+}
+
+export interface StrategyCandidateEvaluationRequest {
+  startDate: string;
+  endDate: string;
+  initialCapital: number;
+  baseCurrency: string;
+  validationDays?: number;
   rebalanceCostsPct: number;
   slippagePct: number;
 }
