@@ -40,6 +40,16 @@ export function useOrdersData() {
   });
 }
 
+export function useBtcNewsInsights() {
+  return useQuery({
+    queryKey: ["btc-news-insights"],
+    queryFn: backendApi.getBtcNewsInsights,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    retry: 1,
+  });
+}
+
 export function useBinanceConnection() {
   return useQuery({
     queryKey: ["binance-connection"],

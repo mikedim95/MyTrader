@@ -25,6 +25,8 @@ import { MinerPollingService } from "./miners/miner-polling-service.js";
 import { MinerReadService } from "./miners/miner-read-service.js";
 import { MinerRepository as FleetMinerRepository } from "./miners/miner-repository.js";
 import { MinerVerifyService } from "./miners/miner-verify-service.js";
+import { createNewsRouter } from "./news/news-api.js";
+import { BtcNewsInsightsService } from "./news/news-service.js";
 import {
   generateRecentDayLabels,
   getTradingPairSnapshot,
@@ -83,6 +85,7 @@ const minerReadService = new MinerReadService(minerRepository, minerHttpClient, 
 const minerVerifyService = new MinerVerifyService(minerHttpClient, minerCgminerClient);
 const minerCommandService = new MinerCommandService(minerRepository, minerHttpClient, minerAuthService, minerReadService);
 const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
+const btcNewsInsightsService = new BtcNewsInsightsService();
 
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
@@ -506,6 +509,13 @@ app.get("/api/mining/nicehash", async (req, res) => {
   const overview = await getNicehashOverviewData(userScope);
   res.json(overview);
 });
+
+app.use(
+  "/api",
+  createNewsRouter({
+    btcNewsInsightsService,
+  })
+);
 
 app.use(
   "/api",

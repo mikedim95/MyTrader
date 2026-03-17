@@ -318,6 +318,60 @@ export interface OrdersResponse {
   orders: Order[];
 }
 
+export type BtcNewsCurrentState = "bullish" | "mildly_bullish" | "neutral" | "mildly_bearish" | "bearish";
+
+export interface BtcNewsInsightsSummary {
+  bias_1h: number;
+  bias_6h: number;
+  bias_24h: number;
+  total_items_24h: number;
+  bullish_count_24h: number;
+  bearish_count_24h: number;
+  neutral_count_24h: number;
+  dominant_topic_24h: string | null;
+  current_state: BtcNewsCurrentState;
+}
+
+export interface BtcNewsInsightArticle {
+  id: number;
+  source: string;
+  title: string;
+  url: string;
+  published_at: string | null;
+  topic: string | null;
+  sentiment: string | null;
+  confidence: number;
+  impact_score: number;
+  time_horizon: string | null;
+  btc_direction: string | null;
+  action_bias: string | null;
+  weighted_score: number;
+  ai_summary: string | null;
+  why_it_matters: string | null;
+  raw_summary: string | null;
+  created_at: string | null;
+}
+
+export interface BtcNewsTopicBreakdownItem {
+  topic: string;
+  count: number;
+  total_weighted_score: number;
+}
+
+export interface BtcNewsActionBreakdown {
+  buy_count: number;
+  sell_count: number;
+  hold_count: number;
+}
+
+export interface BtcNewsInsightsResponse {
+  summary: BtcNewsInsightsSummary;
+  top_articles: BtcNewsInsightArticle[];
+  topic_breakdown: BtcNewsTopicBreakdownItem[];
+  action_breakdown: BtcNewsActionBreakdown;
+  generated_at: string;
+}
+
 export interface MinerBasicInfo {
   id: string;
   name: string;

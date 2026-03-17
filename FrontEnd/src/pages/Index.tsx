@@ -8,6 +8,7 @@ import { PortfolioPage } from "@/pages/PortfolioPage";
 import { TradingPage } from "@/pages/TradingPage";
 import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
+import { BtcNewsInsightsPage } from "@/pages/BtcNewsInsightsPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { NicehashPage } from "@/pages/NicehashPage";
 import type { AppSession, PortfolioAccountType } from "@/types/api";
@@ -48,6 +49,8 @@ const Index = ({ session, onLogout }: IndexProps) => {
         return <RebalancePage accountType={accountType} />;
       case "automation":
         return <AutomationPage accountType={accountType} />;
+      case "btc-news":
+        return <BtcNewsInsightsPage />;
       case "asic-miners":
         return <AsicMinersPage />;
       case "nicehash":

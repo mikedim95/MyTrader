@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   LayoutDashboard,
+  Newspaper,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -27,6 +28,7 @@ const navItems = [
   { id: "trading", label: "Trading", icon: ClipboardList },
   { id: "rebalance", label: "Rebalance", icon: RefreshCw },
   { id: "automation", label: "Strategies", icon: Bot },
+  { id: "btc-news", label: "BTC News", icon: Newspaper },
   { id: "asic-miners", label: "ASIC Miners", icon: HardDrive },
   { id: "nicehash", label: "NiceHash", icon: Cpu },
 ];
