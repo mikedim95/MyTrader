@@ -14,7 +14,16 @@ import {
 } from "@/components/trading/trading-utils";
 import { useDashboardData, useTradingAssets, useTradingPairPreview } from "@/hooks/useTradingData";
 import { backendApi } from "@/lib/api";
-import type { PortfolioAccountType, TradeExecutionResponse, TradePreviewResponse, TradingAmountMode, TradingTransactionRequest } from "@/types/api";
+import type {
+  Asset,
+  DashboardResponse,
+  PortfolioAccountType,
+  TradeExecutionResponse,
+  TradePreviewResponse,
+  TradingAmountMode,
+  TradingAssetAvailability,
+  TradingTransactionRequest,
+} from "@/types/api";
 
 interface TradingPageProps {
   accountType: PortfolioAccountType;
@@ -24,6 +33,140 @@ interface LocalPreview {
   buyAmount: number;
   sellAmount: number;
   buyWorthUsdt: number;
+}
+
+function roundAmount(value: number, digits = 8): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function buildAssetAvailabilityFallback(assets: Asset[] | undefined): TradingAssetAvailability[] {
+  return (assets ?? []).map((asset) => ({
+    symbol: asset.symbol,
+    name: asset.name,
+    totalAmount: asset.balance,
+    reservedAmount: 0,
+    freeAmount: asset.balance,
+    lockedAmount: 0,
+    priceUsd: asset.price,
+    totalValueUsd: asset.value,
+    reservedValueUsd: 0,
+    freeValueUsd: asset.value,
+  }));
+}
+
+function updateTradingAssetAvailabilities(
+  current: TradingAssetAvailability[] | undefined,
+  response: TradeExecutionResponse
+): TradingAssetAvailability[] | undefined {
+  if (!current) return current;
+
+  const map = new Map(current.map((asset) => [asset.symbol, { ...asset }]));
+  const applyDelta = (symbol: string, delta: number, priceUsd: number, name: string) => {
+    const existing = map.get(symbol) ?? buildEmptyAvailability(symbol, priceUsd);
+    existing.name = existing.name || name;
+    existing.priceUsd = Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : existing.priceUsd;
+    existing.totalAmount = roundAmount(Math.max(0, existing.totalAmount + delta), 10);
+    existing.freeAmount = roundAmount(Math.max(0, existing.freeAmount + delta), 10);
+    existing.totalValueUsd = roundAmount(existing.totalAmount * existing.priceUsd, 2);
+    existing.freeValueUsd = roundAmount(existing.freeAmount * existing.priceUsd, 2);
+    existing.reservedValueUsd = roundAmount(existing.reservedAmount * existing.priceUsd, 2);
+    map.set(symbol, existing);
+  };
+
+  applyDelta(
+    response.preview.sellingAsset.symbol,
+    -response.execution.executedSellAmount,
+    response.preview.sellingAsset.priceUsd,
+    response.preview.sellingAsset.name
+  );
+  applyDelta(
+    response.preview.buyingAsset.symbol,
+    response.execution.executedBuyAmount,
+    response.preview.buyingAsset.priceUsd,
+    response.preview.buyingAsset.name
+  );
+
+  return Array.from(map.values())
+    .filter((asset) => asset.totalAmount > 0.0000000001 || asset.reservedAmount > 0.0000000001)
+    .sort((left, right) => right.freeValueUsd - left.freeValueUsd || left.symbol.localeCompare(right.symbol));
+}
+
+function updateDashboardSnapshot(
+  current: DashboardResponse | undefined,
+  response: TradeExecutionResponse
+): DashboardResponse | undefined {
+  if (!current) return current;
+
+  const map = new Map(current.assets.map((asset) => [asset.symbol, { ...asset }]));
+  const applyDelta = (symbol: string, delta: number, priceUsd: number, fallbackName: string) => {
+    const existing = map.get(symbol) ?? {
+      id: symbol.toLowerCase(),
+      symbol,
+      name: fallbackName,
+      price: priceUsd,
+      change24h: 0,
+      volume24h: 0,
+      marketCap: 0,
+      balance: 0,
+      value: 0,
+      allocation: 0,
+      targetAllocation: 0,
+      sparkline: Array.from({ length: 24 }, () => roundAmount(priceUsd, 2)),
+      sparklinePeriod: "24h" as const,
+    };
+
+    existing.price = Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : existing.price;
+    existing.balance = roundAmount(Math.max(0, existing.balance + delta), 10);
+    existing.value = roundAmount(existing.balance * existing.price, 2);
+    if (!existing.sparkline.length) {
+      existing.sparkline = Array.from({ length: 24 }, () => existing.value);
+    }
+    map.set(symbol, existing);
+  };
+
+  applyDelta(
+    response.preview.sellingAsset.symbol,
+    -response.execution.executedSellAmount,
+    response.preview.sellingAsset.priceUsd,
+    response.preview.sellingAsset.name
+  );
+  applyDelta(
+    response.preview.buyingAsset.symbol,
+    response.execution.executedBuyAmount,
+    response.preview.buyingAsset.priceUsd,
+    response.preview.buyingAsset.name
+  );
+
+  const assets = Array.from(map.values())
+    .filter((asset) => asset.balance > 0.0000000001)
+    .sort((left, right) => right.value - left.value);
+  const totalPortfolioValue = roundAmount(assets.reduce((sum, asset) => sum + asset.value, 0), 2);
+  const baselineValue = current.totalPortfolioValue - current.portfolioChange24hValue;
+  const portfolioChange24hValue = roundAmount(totalPortfolioValue - baselineValue, 2);
+  const portfolioChange24h =
+    baselineValue > 0 ? roundAmount((portfolioChange24hValue / baselineValue) * 100, 2) : current.portfolioChange24h;
+
+  const nextAssets = assets.map((asset) => ({
+    ...asset,
+    allocation: totalPortfolioValue > 0 ? roundAmount((asset.value / totalPortfolioValue) * 100, 2) : 0,
+  }));
+
+  const portfolioHistory =
+    current.portfolioHistory.length > 0
+      ? current.portfolioHistory.map((point, index) =>
+          index === current.portfolioHistory.length - 1 ? { ...point, value: totalPortfolioValue } : point
+        )
+      : current.portfolioHistory;
+
+  return {
+    ...current,
+    assets: nextAssets,
+    totalPortfolioValue,
+    portfolioChange24hValue,
+    portfolioChange24h,
+    portfolioHistory,
+  };
 }
 
 export function TradingPage({ accountType }: TradingPageProps) {
@@ -38,7 +181,14 @@ export function TradingPage({ accountType }: TradingPageProps) {
   const [serverPreview, setServerPreview] = useState<TradePreviewResponse | null>(null);
   const [executionResult, setExecutionResult] = useState<TradeExecutionResponse | null>(null);
 
-  const assetAvailabilities = useMemo(() => tradingAssetsData?.assets ?? [], [tradingAssetsData?.assets]);
+  const fallbackAssetAvailabilities = useMemo(
+    () => buildAssetAvailabilityFallback(dashboardData?.assets),
+    [dashboardData?.assets]
+  );
+  const assetAvailabilities = useMemo(
+    () => (tradingAssetsData?.assets && tradingAssetsData.assets.length > 0 ? tradingAssetsData.assets : fallbackAssetAvailabilities),
+    [fallbackAssetAvailabilities, tradingAssetsData?.assets]
+  );
   const symbolSuggestions = useMemo(
     () => Array.from(new Set([...COMMON_SYMBOL_SUGGESTIONS, ...assetAvailabilities.map((asset) => asset.symbol)])).sort((a, b) => a.localeCompare(b)),
     [assetAvailabilities]
@@ -141,13 +291,13 @@ export function TradingPage({ accountType }: TradingPageProps) {
             symbol: normalizedBuyingAsset,
             name: pair.baseName,
             totalAmount: pair.baseBalance,
-            reservedAmount: pair.baseReservedBalance,
-            freeAmount: pair.baseFreeBalance,
-            lockedAmount: pair.baseLockedBalance,
+            reservedAmount: pair.baseReservedBalance ?? 0,
+            freeAmount: pair.baseFreeBalance ?? pair.baseBalance,
+            lockedAmount: pair.baseLockedBalance ?? 0,
             priceUsd: pair.basePriceUsd,
             totalValueUsd: pair.baseBalance * pair.basePriceUsd,
-            reservedValueUsd: pair.baseReservedBalance * pair.basePriceUsd,
-            freeValueUsd: pair.baseFreeBalance * pair.basePriceUsd,
+            reservedValueUsd: (pair.baseReservedBalance ?? 0) * pair.basePriceUsd,
+            freeValueUsd: (pair.baseFreeBalance ?? pair.baseBalance) * pair.basePriceUsd,
           }
         : buildEmptyAvailability(normalizedBuyingAsset))
     );
@@ -162,13 +312,13 @@ export function TradingPage({ accountType }: TradingPageProps) {
             symbol: normalizedSellingAsset,
             name: pair.quoteName,
             totalAmount: pair.quoteBalance,
-            reservedAmount: pair.quoteReservedBalance,
-            freeAmount: pair.quoteFreeBalance,
-            lockedAmount: pair.quoteLockedBalance,
+            reservedAmount: pair.quoteReservedBalance ?? 0,
+            freeAmount: pair.quoteFreeBalance ?? pair.quoteBalance,
+            lockedAmount: pair.quoteLockedBalance ?? 0,
             priceUsd: pair.quotePriceUsd,
             totalValueUsd: pair.quoteBalance * pair.quotePriceUsd,
-            reservedValueUsd: pair.quoteReservedBalance * pair.quotePriceUsd,
-            freeValueUsd: pair.quoteFreeBalance * pair.quotePriceUsd,
+            reservedValueUsd: (pair.quoteReservedBalance ?? 0) * pair.quotePriceUsd,
+            freeValueUsd: (pair.quoteFreeBalance ?? pair.quoteBalance) * pair.quotePriceUsd,
           }
         : buildEmptyAvailability(normalizedSellingAsset))
     );
@@ -204,6 +354,24 @@ export function TradingPage({ accountType }: TradingPageProps) {
     onSuccess: (response) => {
       setExecutionResult(response);
       setServerPreview(response.preview);
+      if (accountType === "demo") {
+        queryClient.setQueryData<DashboardResponse | undefined>(["dashboard", accountType], (current) =>
+          updateDashboardSnapshot(current, response)
+        );
+        queryClient.setQueryData<{
+          accountType: PortfolioAccountType;
+          assets: TradingAssetAvailability[];
+          generatedAt: string;
+        } | undefined>(["trading-assets", accountType], (current) =>
+          current
+            ? {
+                ...current,
+                assets: updateTradingAssetAvailabilities(current.assets, response) ?? current.assets,
+                generatedAt: new Date().toISOString(),
+              }
+            : current
+        );
+      }
       toast.success(response.execution.message);
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["dashboard", accountType] }),
@@ -246,7 +414,9 @@ export function TradingPage({ accountType }: TradingPageProps) {
           loadingPairPreview={loadingPairPreview}
           invalidPairMessage={invalidPairMessage}
           pairErrorMessage={pairPreviewError instanceof Error ? pairPreviewError.message : null}
-          tradingAssetsErrorMessage={tradingAssetsError instanceof Error ? tradingAssetsError.message : null}
+          tradingAssetsErrorMessage={
+            tradingAssetsError instanceof Error && assetAvailabilities.length === 0 ? tradingAssetsError.message : null
+          }
           localBalanceMessage={localBalanceMessage}
           insufficientFreeBalance={insufficientFreeBalance}
           previewDisabled={previewDisabled}

@@ -46,10 +46,12 @@ export function normalizeSymbolInput(value: string): string {
 }
 
 export function formatUsd(value: number): string {
+  if (!Number.isFinite(value)) return "--";
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
 export function formatAssetAmount(value: number, symbol: string): string {
+  if (!Number.isFinite(value)) return `-- ${symbol}`;
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${symbol}`;
 }
 
