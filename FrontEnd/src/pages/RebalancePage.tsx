@@ -23,6 +23,7 @@ import type {
   RebalanceAllocationInput,
   RebalanceAllocationProfile,
   RebalanceAllocationProfilesResponse,
+  RebalanceAllocationStateResponse,
   StrategyConfig,
   StrategyRun,
 } from "@/types/api";
@@ -92,14 +93,23 @@ interface AllocationChartSlice {
 interface DraftAllocationRow {
   id: string;
   symbol: string;
-  percent: string;
+  sliderPercent: number;
+  allocatedValue: string;
+  isEnabled: boolean;
+}
+
+interface DraftAllocationRowValidation {
+  symbol: string;
+  heldValue: number;
+  targetValue: number;
+  exceedsHoldings: boolean;
+  shortfallValue: number;
 }
 
 interface AllocationFormState {
   name: string;
   description: string;
   strategyId: string;
-  allocatedCapital: string;
   baseCurrency: string;
   executionPolicy: RebalanceAllocationExecutionPolicy;
   autoExecuteMinDriftPct: string;
@@ -163,68 +173,85 @@ function createRowId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function createDraftAllocationRow(symbol = "", percent = ""): DraftAllocationRow {
-  return { id: createRowId(), symbol, percent };
+function formatDraftAmount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, "");
 }
 
-function buildDefaultAllocationRows(assetSymbols: string[], baseCurrency: string): DraftAllocationRow[] {
+function createDraftAllocationRow(
+  symbol = "",
+  allocatedValue = "0",
+  sliderPercent = 0,
+  isEnabled = false
+): DraftAllocationRow {
+  return { id: createRowId(), symbol, allocatedValue, sliderPercent, isEnabled };
+}
+
+function buildManagedAssetSymbols(portfolioAssets: Asset[], baseCurrency: string, extraSymbols: string[] = []): string[] {
+  const symbols: string[] = [];
+  const seen = new Set<string>();
+  const pushSymbol = (value: string): void => {
+    const symbol = normalizeSymbol(value);
+    if (!symbol || seen.has(symbol)) return;
+    seen.add(symbol);
+    symbols.push(symbol);
+  };
+
+  portfolioAssets.forEach((asset) => pushSymbol(asset.symbol));
+  extraSymbols.forEach((symbol) => pushSymbol(symbol));
+
+  if (symbols.length === 0) {
+    pushSymbol(baseCurrency);
+  }
+
+  return symbols;
+}
+
+function buildManagedAllocationRows(portfolioAssets: Asset[], baseCurrency: string): DraftAllocationRow[] {
   const normalizedBaseCurrency = normalizeSymbol(baseCurrency);
-  const orderedSymbols = Array.from(new Set(assetSymbols.map((symbol) => normalizeSymbol(symbol)).filter(Boolean)));
-  const preferredSymbols = [
-    ...orderedSymbols.filter((symbol) => symbol !== normalizedBaseCurrency),
-    ...orderedSymbols.filter((symbol) => symbol === normalizedBaseCurrency),
-  ].slice(0, 3);
-
-  if (preferredSymbols.length === 0) {
-    return [createDraftAllocationRow(normalizedBaseCurrency, "100")];
-  }
-
-  if (preferredSymbols.length === 1) {
-    return [createDraftAllocationRow(preferredSymbols[0], "100")];
-  }
-
-  if (preferredSymbols.length === 2) {
-    return [createDraftAllocationRow(preferredSymbols[0], "60"), createDraftAllocationRow(preferredSymbols[1], "40")];
-  }
-
-  return [
-    createDraftAllocationRow(preferredSymbols[0], "40"),
-    createDraftAllocationRow(preferredSymbols[1], "30"),
-    createDraftAllocationRow(preferredSymbols[2], "30"),
-  ];
+  const symbols = buildManagedAssetSymbols(portfolioAssets, normalizedBaseCurrency);
+  return symbols.map((symbol) => createDraftAllocationRow(symbol, "0", 0, false));
 }
 
-function createDefaultFormState(strategyId = "", assetSymbols: string[] = [], baseCurrency = "USDC"): AllocationFormState {
+function createDefaultFormState(strategyId = "", portfolioAssets: Asset[] = [], baseCurrency = "USDC"): AllocationFormState {
   return {
     name: "",
     description: "",
     strategyId,
-    allocatedCapital: "500",
     baseCurrency,
     executionPolicy: "manual",
     autoExecuteMinDriftPct: "2",
     scheduleInterval: "1d",
     isEnabled: true,
-    allocationRows: buildDefaultAllocationRows(assetSymbols, baseCurrency),
+    allocationRows: buildManagedAllocationRows(portfolioAssets, baseCurrency),
   };
 }
 
-function createFormStateFromProfile(profile: RebalanceAllocationProfile): AllocationFormState {
-  const allocationRows = Object.entries(profile.allocation)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([symbol, percent]) => createDraftAllocationRow(symbol, percent.toString()));
+function createFormStateFromProfile(profile: RebalanceAllocationProfile, portfolioAssets: Asset[] = []): AllocationFormState {
+  const portfolioValueBySymbol = portfolioAssets.reduce<Record<string, number>>((map, asset) => {
+    map[normalizeSymbol(asset.symbol)] = asset.value;
+    return map;
+  }, {});
+  const symbols = buildManagedAssetSymbols(portfolioAssets, profile.baseCurrency, Object.keys(profile.allocation));
+  const allocationRows = symbols.map((symbol) => {
+    const heldValue = portfolioValueBySymbol[symbol] ?? 0;
+    const allocatedValue = ((profile.allocation[symbol] ?? 0) / 100) * profile.allocatedCapital;
+    const clampedValue = heldValue > 0 ? Math.min(allocatedValue, heldValue) : 0;
+    const sliderPercent = heldValue > 0 ? Math.min(100, (clampedValue / heldValue) * 100) : 0;
+    return createDraftAllocationRow(symbol, formatDraftAmount(clampedValue), sliderPercent, clampedValue > 0);
+  });
 
   return {
     name: profile.name,
     description: profile.description ?? "",
     strategyId: profile.strategyId,
-    allocatedCapital: profile.allocatedCapital.toString(),
     baseCurrency: profile.baseCurrency,
     executionPolicy: profile.executionPolicy,
     autoExecuteMinDriftPct: profile.autoExecuteMinDriftPct?.toString() ?? "2",
     scheduleInterval: profile.scheduleInterval ?? "1d",
     isEnabled: profile.isEnabled,
-    allocationRows: allocationRows.length > 0 ? allocationRows : [createDraftAllocationRow()],
+    allocationRows: allocationRows.length > 0 ? allocationRows : [createDraftAllocationRow(profile.baseCurrency, "0", 0, false)],
   };
 }
 
@@ -250,6 +277,97 @@ function buildAllocationRows(
     target: targetAllocation[symbol] ?? 0,
     diff: (targetAllocation[symbol] ?? 0) - (currentAllocation[symbol] ?? 0),
   }));
+}
+
+function mergeUniqueWarnings(...collections: ReadonlyArray<readonly string[]>): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  collections.forEach((collection) => {
+    collection.forEach((warning) => {
+      const normalized = warning.trim();
+      if (!normalized || seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      merged.push(normalized);
+    });
+  });
+
+  return merged;
+}
+
+function createExecutedStateSnapshot(
+  state: RebalanceAllocationStateResponse,
+  run: StrategyRun
+): RebalanceAllocationStateResponse {
+  const executedAllocation = run.adjustedAllocation ?? state.executionPlan.adjustedTargetAllocation ?? state.adjustedTargetAllocation;
+  const completedAt = run.completedAt ?? new Date().toISOString();
+  const warnings = mergeUniqueWarnings(run.warnings, state.executionPlan?.warnings ?? [], state.warnings ?? []);
+
+  return {
+    ...state,
+    currentAllocation: { ...executedAllocation },
+    adjustedTargetAllocation: { ...executedAllocation },
+    portfolio: {
+      ...state.portfolio,
+      timestamp: completedAt,
+      allocation: { ...executedAllocation },
+    },
+    executionPlan: {
+      ...state.executionPlan,
+      timestamp: completedAt,
+      currentAllocation: { ...executedAllocation },
+      adjustedTargetAllocation: { ...executedAllocation },
+      rebalanceRequired: false,
+      driftPct: 0,
+      estimatedTurnoverPct: 0,
+      recommendedTrades: [],
+      warnings,
+    },
+    projectedOutcome: state.projectedOutcome
+      ? {
+          ...state.projectedOutcome,
+          generatedAt: completedAt,
+          driftPct: 0,
+          estimatedTurnoverPct: 0,
+          projectedAllocation: { ...executedAllocation },
+          holdings: state.projectedOutcome.holdings.map((holding) => {
+            const nextPercent = executedAllocation[holding.symbol] ?? holding.targetPercent;
+            return {
+              ...holding,
+              currentPercent: nextPercent,
+              targetPercent: nextPercent,
+              currentValue: holding.targetValue,
+              currentQuantity: holding.targetQuantity,
+              deltaValue: 0,
+            };
+          }),
+        }
+      : state.projectedOutcome,
+    warnings,
+  };
+}
+
+function getDraftRowAllocatedValue(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.max(0, parsed);
+}
+
+function clampAllocatedValue(value: number, heldValue: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (!Number.isFinite(heldValue) || heldValue <= 0) return 0;
+  return Math.min(value, heldValue);
+}
+
+function deriveSliderPercentFromValue(allocatedValue: number, heldValue: number): number {
+  if (!Number.isFinite(allocatedValue) || allocatedValue <= 0 || !Number.isFinite(heldValue) || heldValue <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(100, (allocatedValue / heldValue) * 100));
 }
 
 function getAllocationEntries(allocation: RebalanceAllocationProfile["allocation"]): Array<[string, number]> {
@@ -396,17 +514,6 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     [portfolioAssets]
   );
 
-  const allocationAssetOptions = useMemo(() => {
-    const selectedSymbols = formState.allocationRows.map((row) => normalizeSymbol(row.symbol)).filter(Boolean);
-    return Array.from(
-      new Set([
-        ...portfolioAssets.map((asset) => asset.symbol.toUpperCase()),
-        normalizeSymbol(formState.baseCurrency),
-        ...selectedSymbols,
-      ])
-    );
-  }, [formState.allocationRows, formState.baseCurrency, portfolioAssets]);
-
   const reservedCapitalExcludingEdit = useMemo(() => {
     return profiles.reduce((sum, profile) => {
       if (!profile.isEnabled) return sum;
@@ -415,11 +522,19 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     }, 0);
   }, [editingProfileId, profiles]);
 
+  const draftAllocatedCapitalValue = useMemo(
+    () =>
+      formState.allocationRows.reduce((sum, row) => {
+        if (!row.isEnabled) return sum;
+        return sum + getDraftRowAllocatedValue(row.allocatedValue);
+      }, 0),
+    [formState.allocationRows]
+  );
+
   const projectedCapitalReservation = useMemo(() => {
-    const capital = Number(formState.allocatedCapital);
-    const requestedCapital = Number.isFinite(capital) && capital > 0 && formState.isEnabled ? capital : 0;
+    const requestedCapital = draftAllocatedCapitalValue > 0 && formState.isEnabled ? draftAllocatedCapitalValue : 0;
     return reservedCapitalExcludingEdit + requestedCapital;
-  }, [formState.allocatedCapital, formState.isEnabled, reservedCapitalExcludingEdit]);
+  }, [draftAllocatedCapitalValue, formState.isEnabled, reservedCapitalExcludingEdit]);
 
   useEffect(() => {
     if (!selectedProfileId || !profiles.some((profile) => profile.id === selectedProfileId)) {
@@ -433,9 +548,9 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     }
 
     setFormState((current) =>
-      current.strategyId ? current : createDefaultFormState(defaultStrategyId, allocationAssetOptions, current.baseCurrency)
+      current.strategyId ? current : createDefaultFormState(defaultStrategyId, portfolioAssets, current.baseCurrency)
     );
-  }, [allocationAssetOptions, defaultStrategyId, editingProfileId, profileModalOpen]);
+  }, [defaultStrategyId, editingProfileId, portfolioAssets, profileModalOpen]);
 
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
@@ -552,8 +667,42 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
         : `Allocation execution completed with status: ${result.run.status}.`;
       toast.success(message);
       setErrorMessage("");
+      const targetProfileId = result.run.rebalanceAllocationId ?? selectedProfileId;
+      const canProjectExecutedState =
+        result.run.status === "completed" &&
+        Boolean(result.run.adjustedAllocation) &&
+        Boolean(targetProfileId) &&
+        Boolean(queryClient.getQueryData<RebalanceAllocationStateResponse>(["rebalance-allocation-state", targetProfileId]));
+
+      if (targetProfileId) {
+        setSelectedProfileId(targetProfileId);
+        queryClient.setQueryData<RebalanceAllocationProfilesResponse>(["rebalance-allocation-profiles"], (current) => ({
+          profiles: (current?.profiles ?? []).map((profile) =>
+            profile.id === targetProfileId
+              ? {
+                  ...profile,
+                  lastEvaluatedAt: result.run.completedAt ?? profile.lastEvaluatedAt,
+                  lastExecutedAt: result.run.completedAt ?? profile.lastExecutedAt,
+                  updatedAt: result.run.completedAt ?? profile.updatedAt,
+                }
+              : profile
+          ),
+        }));
+
+        if (canProjectExecutedState) {
+          queryClient.setQueryData<RebalanceAllocationStateResponse>(
+            ["rebalance-allocation-state", targetProfileId],
+            (current) => (current ? createExecutedStateSnapshot(current, result.run) : current)
+          );
+        }
+      }
+
       setSelectedRunId(result.run.id);
-      void invalidateQueries({ profileId: result.run.rebalanceAllocationId, runId: result.run.id });
+      void invalidateQueries({
+        profileId: targetProfileId,
+        includeState: !canProjectExecutedState,
+        runId: result.run.id,
+      });
     },
     onError: (error) => {
       setErrorMessage(error instanceof Error ? error.message : "Unable to execute allocation.");
@@ -674,14 +823,14 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
   const openCreateModal = (): void => {
     setErrorMessage("");
     setEditingProfileId(null);
-    setFormState(createDefaultFormState(defaultStrategyId, allocationAssetOptions));
+    setFormState(createDefaultFormState(defaultStrategyId, portfolioAssets));
     setProfileModalOpen(true);
   };
 
   const openEditModal = (profile: RebalanceAllocationProfile): void => {
     setErrorMessage("");
     setEditingProfileId(profile.id);
-    setFormState(createFormStateFromProfile(profile));
+    setFormState(createFormStateFromProfile(profile, portfolioAssets));
     setProfileModalOpen(true);
   };
 
@@ -691,45 +840,92 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     setEditingProfileId(null);
   };
 
-  const totalDraftPercent = useMemo(
+  const allocationRowValidationById = useMemo<Record<string, DraftAllocationRowValidation>>(
     () =>
-      formState.allocationRows.reduce((sum, row) => {
-        const percent = Number(row.percent);
-        return Number.isFinite(percent) ? sum + percent : sum;
-      }, 0),
-    [formState.allocationRows]
+      formState.allocationRows.reduce<Record<string, DraftAllocationRowValidation>>((map, row) => {
+        const symbol = normalizeSymbol(row.symbol);
+        const targetValue = row.isEnabled ? getDraftRowAllocatedValue(row.allocatedValue) : 0;
+        const heldValue = portfolioAssetMap[symbol]?.value ?? 0;
+        const exceedsHoldings =
+          row.isEnabled && Boolean(symbol) && Number.isFinite(targetValue) && targetValue - heldValue > 0.0001;
+
+        map[row.id] = {
+          symbol,
+          heldValue,
+          targetValue,
+          exceedsHoldings,
+          shortfallValue: exceedsHoldings ? targetValue - heldValue : 0,
+        };
+
+        return map;
+      }, {}),
+    [formState.allocationRows, portfolioAssetMap]
   );
 
-  const availableSymbolsByRow = useMemo(() => {
-    return formState.allocationRows.reduce<Record<string, string[]>>((map, row) => {
-      const currentSymbol = normalizeSymbol(row.symbol);
-      const selectedElsewhere = new Set(
-        formState.allocationRows
-          .filter((entry) => entry.id !== row.id)
-          .map((entry) => normalizeSymbol(entry.symbol))
-          .filter(Boolean)
-      );
-      const options = allocationAssetOptions.filter((symbol) => symbol === currentSymbol || !selectedElsewhere.has(symbol));
-      map[row.id] = currentSymbol && !options.includes(currentSymbol) ? [currentSymbol, ...options] : options;
-      return map;
-    }, {});
-  }, [allocationAssetOptions, formState.allocationRows]);
+  const overAllocatedRows = useMemo(
+    () => Object.values(allocationRowValidationById).filter((row) => row.exceedsHoldings),
+    [allocationRowValidationById]
+  );
 
-  const remainingAllocationSymbols = useMemo(() => {
-    const selected = new Set(formState.allocationRows.map((row) => normalizeSymbol(row.symbol)).filter(Boolean));
-    return allocationAssetOptions.filter((symbol) => !selected.has(symbol));
-  }, [allocationAssetOptions, formState.allocationRows]);
+  const updateManagedFundSlider = (rowId: string, nextSliderPercent: number): void => {
+    const clampedSlider = Math.max(0, Math.min(100, nextSliderPercent));
+
+    setFormState((current) => ({
+      ...current,
+      allocationRows: current.allocationRows.map((entry) => {
+        if (entry.id !== rowId) return entry;
+        const heldValue = portfolioAssetMap[normalizeSymbol(entry.symbol)]?.value ?? 0;
+        const allocatedValue = clampAllocatedValue((heldValue * clampedSlider) / 100, heldValue);
+        return {
+          ...entry,
+          isEnabled: clampedSlider > 0,
+          sliderPercent: clampedSlider,
+          allocatedValue: formatDraftAmount(allocatedValue),
+        };
+      }),
+    }));
+  };
+
+  const updateManagedFundValue = (rowId: string, rawValue: string): void => {
+    setFormState((current) => ({
+      ...current,
+      allocationRows: current.allocationRows.map((entry) => {
+        if (entry.id !== rowId) return entry;
+        const heldValue = portfolioAssetMap[normalizeSymbol(entry.symbol)]?.value ?? 0;
+        if (rawValue.trim() === "") {
+          return {
+            ...entry,
+            isEnabled: false,
+            sliderPercent: 0,
+            allocatedValue: "",
+          };
+        }
+
+        const clampedValue = clampAllocatedValue(Number(rawValue), heldValue);
+        return {
+          ...entry,
+          isEnabled: clampedValue > 0,
+          sliderPercent: deriveSliderPercentFromValue(clampedValue, heldValue),
+          allocatedValue: formatDraftAmount(clampedValue),
+        };
+      }),
+    }));
+  };
 
   const submitProfileForm = (): void => {
     const name = formState.name.trim();
     const strategyId = formState.strategyId.trim();
     const baseCurrency = normalizeSymbol(formState.baseCurrency);
-    const allocatedCapital = Number(formState.allocatedCapital);
+    const allocatedCapital = draftAllocatedCapitalValue;
     const autoExecuteMinDriftPct = Number(formState.autoExecuteMinDriftPct);
-    const normalizedRows = formState.allocationRows
-      .map((row) => ({ symbol: normalizeSymbol(row.symbol), percent: Number(row.percent) }))
-      .filter((row) => row.symbol && Number.isFinite(row.percent) && row.percent > 0);
-    const totalPercent = normalizedRows.reduce((sum, row) => sum + row.percent, 0);
+    const enabledRows = formState.allocationRows.filter((row) => row.isEnabled && normalizeSymbol(row.symbol));
+    const invalidEnabledRows = enabledRows.filter((row) => {
+      const allocatedValue = getDraftRowAllocatedValue(row.allocatedValue);
+      return !Number.isFinite(allocatedValue) || allocatedValue <= 0;
+    });
+    const normalizedRows = enabledRows
+      .map((row) => ({ symbol: normalizeSymbol(row.symbol), allocatedValue: getDraftRowAllocatedValue(row.allocatedValue) }))
+      .filter((row) => row.symbol && Number.isFinite(row.allocatedValue) && row.allocatedValue > 0);
     const duplicateSymbols = new Set<string>();
     const uniqueSymbols = new Set<string>();
     normalizedRows.forEach((row) => {
@@ -752,7 +948,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       return;
     }
     if (!Number.isFinite(allocatedCapital) || allocatedCapital <= 0) {
-      setErrorMessage("Allocated capital must be greater than zero.");
+      setErrorMessage("Managed capital must be greater than zero.");
       return;
     }
     if (
@@ -769,16 +965,27 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       setErrorMessage("Base currency is required.");
       return;
     }
+    if (enabledRows.length === 0) {
+      setErrorMessage("Enable at least one managed fund.");
+      return;
+    }
+    if (invalidEnabledRows.length > 0) {
+      setErrorMessage(`Enabled funds must have a value greater than zero. Fix ${normalizeSymbol(invalidEnabledRows[0].symbol)}.`);
+      return;
+    }
     if (normalizedRows.length === 0) {
-      setErrorMessage("Add at least one asset allocation row.");
+      setErrorMessage("Enabled funds must allocate a positive value.");
       return;
     }
     if (duplicateSymbols.size > 0) {
       setErrorMessage(`Duplicate asset symbols are not allowed: ${Array.from(duplicateSymbols).join(", ")}.`);
       return;
     }
-    if (Math.abs(totalPercent - 100) > 0.001) {
-      setErrorMessage(`Allocation rows must total 100.00%. Current total: ${totalPercent.toFixed(2)}%.`);
+    if (overAllocatedRows.length > 0) {
+      const firstInvalidRow = overAllocatedRows[0];
+      setErrorMessage(
+        `${firstInvalidRow.symbol} target requires ${formatUsd(firstInvalidRow.targetValue)} but only ${formatUsd(firstInvalidRow.heldValue)} is currently held.`
+      );
       return;
     }
     if (
@@ -799,7 +1006,10 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       strategyId,
       allocatedCapital,
       baseCurrency,
-      allocations: normalizedRows as DemoAccountAllocationInput[],
+      allocations: normalizedRows.map((row) => ({
+        symbol: row.symbol,
+        percent: allocatedCapital > 0 ? (row.allocatedValue / allocatedCapital) * 100 : 0,
+      })) as DemoAccountAllocationInput[],
       isEnabled: formState.isEnabled,
       executionPolicy: formState.executionPolicy,
       autoExecuteMinDriftPct:
@@ -878,7 +1088,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
       </div>
 
       <div className="rounded-lg border border-border bg-card px-4 py-3 text-[11px] text-muted-foreground">
-        Strategies decide the target. Allocation profiles define the capital, holdings, and auto-execution rules for each specific rebalance situation.
+        Strategies decide the target. Allocation profiles define the capital bucket, managed funds, and auto-execution rules for each rebalance situation.
       </div>
 
       {errorMessage ? (
@@ -928,7 +1138,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
           <div className="text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground">No Active Allocation</div>
           <h3 className="mt-3 text-lg font-mono font-semibold text-foreground">Create your first rebalance allocation</h3>
           <p className="mx-auto mt-3 max-w-2xl text-sm text-muted-foreground">
-            Each allocation keeps its own capital, asset mix, linked strategy, and execution policy so you can switch between multiple rebalance situations.
+            Each allocation keeps its own capital bucket, enabled funds, linked strategy, and execution policy so you can switch between multiple rebalance situations.
           </p>
           <button
             type="button"
@@ -977,7 +1187,7 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
                     <div className="mt-4 grid grid-cols-2 gap-3 text-xs font-mono">
                       <div>
-                        <div className="text-muted-foreground">Capital</div>
+                        <div className="text-muted-foreground">Managed Capital</div>
                         <div className="mt-1 text-foreground">{formatUsd(profile.allocatedCapital)}</div>
                       </div>
                       <div>
@@ -997,13 +1207,13 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                     {profile.description ? <div className="mt-4 text-xs text-muted-foreground">{profile.description}</div> : null}
 
                     <div className="mt-4 rounded-lg border border-border bg-secondary/20 p-3">
-                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Target Mix</div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Managed Funds</div>
                       <div className="mt-3 space-y-2">
                         {allocationEntries.map(([symbol, percent]) => (
                           <div key={`${profile.id}-${symbol}`} className="flex items-center justify-between gap-3 text-xs font-mono">
                             <div className="min-w-0">
                               <div className="truncate text-foreground">{symbol}</div>
-                              <div className="text-muted-foreground">{percent.toFixed(2)}%</div>
+                              <div className="text-muted-foreground">Included fund</div>
                             </div>
                             <div className="shrink-0 text-right text-foreground">
                               {formatNotional((profile.allocatedCapital * percent) / 100, profile.baseCurrency)}
@@ -1738,13 +1948,15 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                     <div>
-                      <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Allocated Capital</label>
-                      <input
-                        value={formState.allocatedCapital}
-                        onChange={(event) => setFormState((current) => ({ ...current, allocatedCapital: event.target.value }))}
-                        className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground outline-none"
-                        placeholder="500"
-                      />
+                      <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Managed Capital</label>
+                      <div
+                        className={cn(
+                          "mt-1 flex h-[50px] items-center rounded-md border bg-secondary px-3 py-3 text-sm font-mono",
+                          "border-border text-foreground"
+                        )}
+                      >
+                        {formatNotional(draftAllocatedCapitalValue, normalizeSymbol(formState.baseCurrency))}
+                      </div>
                     </div>
                     <div>
                       <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Base Currency</label>
@@ -1847,124 +2059,134 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                   <div className="rounded-xl border border-border bg-card/60 p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Target Allocation</div>
+                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Managed Funds</div>
                         <div className="mt-1 text-sm text-muted-foreground">
-                          Choose from your current portfolio assets. Each asset can appear only once in this allocation, and the target worth updates from the capital and percentage.
+                          The strategy sets the target allocation. Here you only choose how much of each currently held asset belongs to this managed bucket.
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Current Total</div>
-                        <div className={cn("mt-1 text-sm font-mono", Math.abs(totalDraftPercent - 100) < 0.001 ? "text-positive" : "text-foreground")}>
-                          {totalDraftPercent.toFixed(2)}%
+                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Managed Total</div>
+                        <div className="mt-1 text-sm font-mono text-foreground">
+                          {formatNotional(draftAllocatedCapitalValue, normalizeSymbol(formState.baseCurrency))}
                         </div>
                       </div>
                     </div>
+
+                    {overAllocatedRows.length > 0 ? (
+                      <div className="mt-4 rounded-md border border-negative/40 bg-negative/10 px-3 py-2 text-xs font-mono text-negative">
+                        {overAllocatedRows[0].symbol} needs {formatUsd(overAllocatedRows[0].targetValue)} but only {formatUsd(overAllocatedRows[0].heldValue)} is currently held.
+                      </div>
+                    ) : null}
 
                     <div className="mt-4 space-y-3">
-                      {formState.allocationRows.map((row, index) => (
-                        <div key={row.id} className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_auto]">
-                          <div>
-                            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Asset {index + 1}</label>
-                            <select
-                              value={row.symbol}
-                              onChange={(event) =>
-                                setFormState((current) => ({
-                                  ...current,
-                                  allocationRows: current.allocationRows.map((entry) =>
-                                    entry.id === row.id ? { ...entry, symbol: event.target.value } : entry
-                                  ),
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono uppercase text-foreground outline-none"
-                            >
-                              <option value="">Select asset</option>
-                              {(availableSymbolsByRow[row.id] ?? []).map((symbol) => {
-                                const asset = portfolioAssetMap[symbol];
-                                const optionLabel = asset ? `${symbol} - held ${formatUsd(asset.value)}` : `${symbol} - base`;
-                                return (
-                                  <option key={symbol} value={symbol}>
-                                    {optionLabel}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {portfolioAssetMap[normalizeSymbol(row.symbol)]
-                                ? `Held now: ${formatUsd(portfolioAssetMap[normalizeSymbol(row.symbol)].value)}`
-                                : `Base asset: ${normalizeSymbol(row.symbol) || normalizeSymbol(formState.baseCurrency)}`}
-                            </div>
-                          </div>
-                          <div>
-                            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Percent</label>
-                            <input
-                              value={row.percent}
-                              onChange={(event) =>
-                                setFormState((current) => ({
-                                  ...current,
-                                  allocationRows: current.allocationRows.map((entry) =>
-                                    entry.id === row.id ? { ...entry, percent: event.target.value } : entry
-                                  ),
-                                }))
-                              }
-                              className="mt-1 w-full rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground outline-none"
-                              placeholder="25"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                              Worth ({normalizeSymbol(formState.baseCurrency)})
-                            </label>
-                            <div className="mt-1 flex h-[50px] items-center rounded-md border border-border bg-secondary px-3 py-3 text-sm font-mono text-foreground">
-                              {formatNotional(
-                                (Number(formState.allocatedCapital) * Number(row.percent)) / 100,
-                                normalizeSymbol(formState.baseCurrency)
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-end">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setFormState((current) => ({
-                                  ...current,
-                                  allocationRows:
-                                    current.allocationRows.length > 1
-                                      ? current.allocationRows.filter((entry) => entry.id !== row.id)
-                                      : [createDraftAllocationRow(normalizeSymbol(current.baseCurrency), "100")],
-                                }))
-                              }
-                              className="inline-flex h-12 items-center justify-center rounded-md border border-border px-3 text-xs font-mono text-muted-foreground hover:text-foreground"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                      {formState.allocationRows.map((row, index) => {
+                        const rowValidation = allocationRowValidationById[row.id];
 
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFormState((current) => ({
-                            ...current,
-                            allocationRows: [
-                              ...current.allocationRows,
-                              createDraftAllocationRow(remainingAllocationSymbols[0] ?? "", ""),
-                            ],
-                          }))
-                        }
-                        disabled={remainingAllocationSymbols.length === 0}
-                        className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-mono text-foreground hover:bg-secondary"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Add Asset
-                      </button>
-                      <div className="text-xs text-muted-foreground">
-                        {remainingAllocationSymbols.length === 0
-                          ? "All available assets are already used in this allocation."
-                          : "Each selected asset is locked to one row until removed."}
-                      </div>
+                        return (
+                          <div
+                            key={row.id}
+                            className={cn(
+                              "grid grid-cols-1 gap-3 rounded-lg border p-3 md:grid-cols-[minmax(0,1fr)_140px_minmax(220px,1fr)_180px]",
+                              row.isEnabled ? "border-border bg-card/50" : "border-border/60 bg-secondary/10 opacity-80"
+                            )}
+                          >
+                            <div>
+                              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Fund {index + 1}</label>
+                              <div
+                                className={cn(
+                                  "mt-1 flex h-[50px] items-center rounded-md border bg-secondary px-3 py-3 text-sm font-mono",
+                                  rowValidation?.exceedsHoldings ? "border-negative text-negative" : "border-border text-foreground"
+                                )}
+                              >
+                                {normalizeSymbol(row.symbol) || "--"}
+                              </div>
+                              <div className={cn("mt-1 text-xs", rowValidation?.exceedsHoldings ? "text-negative" : "text-muted-foreground")}>
+                                Held now: {formatUsd(portfolioAssetMap[normalizeSymbol(row.symbol)]?.value ?? 0)}
+                                {row.isEnabled ? `  Allocating ${formatUsd(rowValidation?.targetValue ?? 0)}.` : "  Fund disabled."}
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Use Fund</label>
+                              <label
+                                className={cn(
+                                  "mt-1 flex h-[50px] cursor-pointer items-center gap-3 rounded-md border px-3 py-3 text-sm font-mono",
+                                  row.isEnabled ? "border-primary/30 bg-primary/10 text-foreground" : "border-border bg-secondary text-muted-foreground"
+                                )}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={row.isEnabled}
+                                  onChange={(event) =>
+                                    setFormState((current) => ({
+                                      ...current,
+                                      allocationRows: current.allocationRows.map((entry) =>
+                                        entry.id === row.id
+                                          ? {
+                                              ...entry,
+                                              isEnabled: event.target.checked,
+                                              sliderPercent: event.target.checked ? (entry.sliderPercent > 0 ? entry.sliderPercent : 100) : 0,
+                                              allocatedValue: event.target.checked
+                                                ? formatDraftAmount(
+                                                    portfolioAssetMap[normalizeSymbol(entry.symbol)]?.value ?? 0
+                                                  )
+                                                : "0",
+                                            }
+                                          : entry
+                                      ),
+                                    }))
+                                  }
+                                  className="h-4 w-4 rounded border-border bg-secondary"
+                                />
+                                <span>{row.isEnabled ? "Included" : "Disabled"}</span>
+                              </label>
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Allocation Slider</label>
+                              <div className="mt-1 rounded-md border border-border bg-secondary px-3 py-3">
+                                <div className="flex items-center gap-3">
+                                  <input
+                                    type="range"
+                                    min={0}
+                                    max={100}
+                                    step={1}
+                                    value={Math.round(row.sliderPercent)}
+                                    onChange={(event) => updateManagedFundSlider(row.id, Number(event.target.value))}
+                                    disabled={!row.isEnabled}
+                                    className="h-2 w-full accent-primary disabled:cursor-not-allowed"
+                                  />
+                                  <div className="w-12 shrink-0 text-right text-xs font-mono text-foreground">
+                                    {Math.round(row.sliderPercent)}%
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-[11px] text-muted-foreground">
+                                  Allocate a fraction of this asset's currently held value.
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                                Static Value ({normalizeSymbol(formState.baseCurrency)})
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={rowValidation?.heldValue ?? 0}
+                                step="0.01"
+                                value={row.isEnabled ? row.allocatedValue : "0"}
+                                onChange={(event) => updateManagedFundValue(row.id, event.target.value)}
+                                disabled={!row.isEnabled}
+                                className={cn(
+                                  "mt-1 w-full rounded-md border bg-secondary px-3 py-3 text-sm font-mono outline-none disabled:cursor-not-allowed disabled:opacity-60",
+                                  rowValidation?.exceedsHoldings ? "border-negative text-negative" : "border-border text-foreground"
+                                )}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-4 text-xs text-muted-foreground">
+                      All currently available funds are listed automatically. Use the slider to allocate a percentage of each asset's own held value, or type the exact static value directly and the slider will update immediately.
                     </div>
                   </div>
                 </div>
@@ -1986,7 +2208,13 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                   <button
                     type="button"
                     onClick={submitProfileForm}
-                    disabled={createProfileMutation.isPending || updateProfileMutation.isPending || loadingStrategies || usableStrategies.length === 0}
+                    disabled={
+                      createProfileMutation.isPending ||
+                      updateProfileMutation.isPending ||
+                      loadingStrategies ||
+                      usableStrategies.length === 0 ||
+                      overAllocatedRows.length > 0
+                    }
                     className="rounded-md bg-primary px-4 py-2.5 text-sm font-mono font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {editingProfileId ? "Save Allocation" : "Create Allocation"}
