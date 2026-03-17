@@ -8,6 +8,7 @@ import type {
   BacktestsResponse,
   BtcNewsInsightsResponse,
   ConnectionStatus,
+  DecisionIntelligenceResponse,
   DemoAccountInitializeRequest,
   DemoAccountSettingsResponse,
   CreateBacktestResponse,
@@ -185,6 +186,8 @@ export const backendApi = {
     apiRequest<TradingPairPreviewResponse>(withQuery("/api/trading/pair-preview", { base, quote, accountType })),
   getOrders: () => apiRequest<OrdersResponse>("/api/orders"),
   getBtcNewsInsights: () => apiRequest<BtcNewsInsightsResponse>("/api/news/btc/insights"),
+  getDecisionIntelligence: (accountType: PortfolioAccountType = "real") =>
+    apiRequest<DecisionIntelligenceResponse>(withQuery("/api/decision/intelligence", { accountType })),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),
   getNicehashOverview: () => apiRequest<NicehashOverviewResponse>("/api/mining/nicehash"),
   verifyMinerDraft: (body: { name: string; ip: string; password: string }) =>

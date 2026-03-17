@@ -372,6 +372,27 @@ export interface BtcNewsInsightsResponse {
   generated_at: string;
 }
 
+export type DecisionMarketRegime = "trend_up" | "trend_down" | "range" | "uncertain";
+export type DecisionRecommendation =
+  | "buy_favorable"
+  | "mild_buy_favorable"
+  | "hold_neutral"
+  | "mild_sell_favorable"
+  | "sell_favorable";
+
+export interface DecisionIntelligenceResponse {
+  technical_score: number;
+  news_score: number;
+  portfolio_score: number;
+  final_score: number;
+  market_regime: DecisionMarketRegime;
+  recommendation: DecisionRecommendation;
+  confidence: number;
+  top_contributors: string[];
+  blockers: string[];
+  summary: string;
+}
+
 export interface MinerBasicInfo {
   id: string;
   name: string;

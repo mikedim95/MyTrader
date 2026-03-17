@@ -50,6 +50,16 @@ export function useBtcNewsInsights() {
   });
 }
 
+export function useDecisionIntelligence(accountType: PortfolioAccountType = "real") {
+  return useQuery({
+    queryKey: ["decision-intelligence", accountType],
+    queryFn: () => backendApi.getDecisionIntelligence(accountType),
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}
+
 export function useBinanceConnection() {
   return useQuery({
     queryKey: ["binance-connection"],

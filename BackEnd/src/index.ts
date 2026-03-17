@@ -25,6 +25,8 @@ import { MinerPollingService } from "./miners/miner-polling-service.js";
 import { MinerReadService } from "./miners/miner-read-service.js";
 import { MinerRepository as FleetMinerRepository } from "./miners/miner-repository.js";
 import { MinerVerifyService } from "./miners/miner-verify-service.js";
+import { createDecisionRouter } from "./decision/decision-api.js";
+import { DecisionIntelligenceService } from "./decision/decision-service.js";
 import { createNewsRouter } from "./news/news-api.js";
 import { BtcNewsInsightsService } from "./news/news-service.js";
 import {
@@ -86,6 +88,7 @@ const minerVerifyService = new MinerVerifyService(minerHttpClient, minerCgminerC
 const minerCommandService = new MinerCommandService(minerRepository, minerHttpClient, minerAuthService, minerReadService);
 const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
 const btcNewsInsightsService = new BtcNewsInsightsService();
+const decisionIntelligenceService = new DecisionIntelligenceService(strategyRepository, btcNewsInsightsService);
 
 function round(value: number, digits = 2): number {
   const factor = 10 ** digits;
@@ -514,6 +517,13 @@ app.use(
   "/api",
   createNewsRouter({
     btcNewsInsightsService,
+  })
+);
+
+app.use(
+  "/api",
+  createDecisionRouter({
+    decisionIntelligenceService,
   })
 );
 
