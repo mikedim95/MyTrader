@@ -80,8 +80,11 @@ interface RebalancePageProps {
 interface AllocationRow {
   symbol: string;
   current: number;
+  currentWorth: number;
   target: number;
+  targetWorth: number;
   diff: number;
+  diffWorth: number;
 }
 
 interface AllocationChartSlice {
@@ -265,7 +268,8 @@ function buildChartSignature(data: AllocationChartSlice[]): string {
 
 function buildAllocationRows(
   currentAllocation: Record<string, number>,
-  targetAllocation: Record<string, number>
+  targetAllocation: Record<string, number>,
+  totalValue = 0
 ): AllocationRow[] {
   const symbols = Array.from(new Set([...Object.keys(currentAllocation), ...Object.keys(targetAllocation)])).sort((a, b) =>
     a.localeCompare(b)
@@ -274,8 +278,11 @@ function buildAllocationRows(
   return symbols.map((symbol) => ({
     symbol,
     current: currentAllocation[symbol] ?? 0,
+    currentWorth: ((currentAllocation[symbol] ?? 0) / 100) * totalValue,
     target: targetAllocation[symbol] ?? 0,
+    targetWorth: ((targetAllocation[symbol] ?? 0) / 100) * totalValue,
     diff: (targetAllocation[symbol] ?? 0) - (currentAllocation[symbol] ?? 0),
+    diffWorth: (((targetAllocation[symbol] ?? 0) - (currentAllocation[symbol] ?? 0)) / 100) * totalValue,
   }));
 }
 
@@ -711,8 +718,12 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
 
   const currentAllocation = state?.executionPlan?.currentAllocation ?? state?.currentAllocation ?? EMPTY_ALLOCATION_MAP;
   const targetAllocation = state?.executionPlan?.adjustedTargetAllocation ?? state?.adjustedTargetAllocation ?? EMPTY_ALLOCATION_MAP;
+  const allocationTotalValue = state?.portfolio?.totalValue ?? selectedProfile?.allocatedCapital ?? 0;
 
-  const allocationRows = useMemo<AllocationRow[]>(() => buildAllocationRows(currentAllocation, targetAllocation), [currentAllocation, targetAllocation]);
+  const allocationRows = useMemo<AllocationRow[]>(
+    () => buildAllocationRows(currentAllocation, targetAllocation, allocationTotalValue),
+    [allocationTotalValue, currentAllocation, targetAllocation]
+  );
 
   const allocationColors = useMemo(
     () =>
@@ -757,9 +768,16 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
     () =>
       buildAllocationRows(
         selectedRunExecutionPlan?.currentAllocation ?? selectedRun?.inputSnapshot?.portfolio.allocation ?? {},
-        selectedRunExecutionPlan?.adjustedTargetAllocation ?? selectedRun?.adjustedAllocation ?? {}
+        selectedRunExecutionPlan?.adjustedTargetAllocation ?? selectedRun?.adjustedAllocation ?? {},
+        selectedRun?.inputSnapshot?.portfolio.totalValue ?? selectedProfile?.allocatedCapital ?? 0
       ),
-    [selectedRun?.adjustedAllocation, selectedRun?.inputSnapshot?.portfolio.allocation, selectedRunExecutionPlan]
+    [
+      selectedProfile?.allocatedCapital,
+      selectedRun?.adjustedAllocation,
+      selectedRun?.inputSnapshot?.portfolio.allocation,
+      selectedRun?.inputSnapshot?.portfolio.totalValue,
+      selectedRunExecutionPlan,
+    ]
   );
   const selectedRunSummary = useMemo(() => {
     if (!selectedRun) return "Select a rebalance event to inspect it.";
@@ -1382,16 +1400,32 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                     allocationRows.map((row) => (
                       <tr key={row.symbol} className="border-b border-border last:border-b-0">
                         <td className="px-4 py-3 text-left text-sm font-mono text-foreground">{row.symbol}</td>
-                        <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.current.toFixed(2)}%</td>
-                        <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.target.toFixed(2)}%</td>
+                        <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                          <div>{row.current.toFixed(2)}%</div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            {formatNotional(row.currentWorth, selectedProfile?.baseCurrency ?? "USDC")}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                          <div>{row.target.toFixed(2)}%</div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            {formatNotional(row.targetWorth, selectedProfile?.baseCurrency ?? "USDC")}
+                          </div>
+                        </td>
                         <td
                           className={cn(
                             "px-4 py-3 text-right text-sm font-mono",
                             row.diff > 0 ? "text-positive" : row.diff < 0 ? "text-negative" : "text-muted-foreground"
                           )}
                         >
-                          {row.diff > 0 ? "+" : ""}
-                          {row.diff.toFixed(2)}%
+                          <div>
+                            {row.diff > 0 ? "+" : ""}
+                            {row.diff.toFixed(2)}%
+                          </div>
+                          <div className="mt-1 text-[11px]">
+                            {row.diffWorth > 0 ? "+" : ""}
+                            {formatNotional(row.diffWorth, selectedProfile?.baseCurrency ?? "USDC")}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right text-sm font-mono">
                           <span
@@ -1730,16 +1764,32 @@ export function RebalancePage({ accountType }: RebalancePageProps) {
                               selectedRunAllocationRows.map((row) => (
                                 <tr key={`run-allocation-${row.symbol}`} className="border-b border-border last:border-b-0">
                                   <td className="px-4 py-3 text-left text-sm font-mono text-foreground">{row.symbol}</td>
-                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.current.toFixed(2)}%</td>
-                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">{row.target.toFixed(2)}%</td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                    <div>{row.current.toFixed(2)}%</div>
+                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                      {formatNotional(row.currentWorth, selectedRunBaseCurrency)}
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                    <div>{row.target.toFixed(2)}%</div>
+                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                      {formatNotional(row.targetWorth, selectedRunBaseCurrency)}
+                                    </div>
+                                  </td>
                                   <td
                                     className={cn(
                                       "px-4 py-3 text-right text-sm font-mono",
                                       row.diff > 0 ? "text-positive" : row.diff < 0 ? "text-negative" : "text-muted-foreground"
                                     )}
                                   >
-                                    {row.diff > 0 ? "+" : ""}
-                                    {row.diff.toFixed(2)}%
+                                    <div>
+                                      {row.diff > 0 ? "+" : ""}
+                                      {row.diff.toFixed(2)}%
+                                    </div>
+                                    <div className="mt-1 text-[11px]">
+                                      {row.diffWorth > 0 ? "+" : ""}
+                                      {formatNotional(row.diffWorth, selectedRunBaseCurrency)}
+                                    </div>
                                   </td>
                                   <td className="px-4 py-3 text-right text-sm font-mono">
                                     <span
