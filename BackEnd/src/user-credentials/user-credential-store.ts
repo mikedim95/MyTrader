@@ -1,14 +1,14 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import pool from "../db.js";
-import type { BinanceCredentials, NicehashCredentials } from "../types.js";
+import type { NicehashCredentials } from "../types.js";
 import type { StrategyUserScope } from "../strategy/strategy-user-scope.js";
 
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12;
 const DEFAULT_SECRET = "local-dev-user-credentials-secret";
 
-type CredentialProvider = "binance" | "nicehash";
+type CredentialProvider = "nicehash";
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -282,24 +282,12 @@ export class UserCredentialStore {
     });
   }
 
-  getBinanceCredentials(scope?: StrategyUserScope): Promise<StoredCredentialLookup<BinanceCredentials>> {
-    return this.lookupCredential<BinanceCredentials>("binance", scope);
-  }
-
   getNicehashCredentials(scope?: StrategyUserScope): Promise<StoredCredentialLookup<NicehashCredentials>> {
     return this.lookupCredential<NicehashCredentials>("nicehash", scope);
   }
 
-  storeBinanceCredentials(credentials: BinanceCredentials, scope?: StrategyUserScope): Promise<void> {
-    return this.upsertCredential("binance", credentials, scope);
-  }
-
   storeNicehashCredentials(credentials: NicehashCredentials, scope?: StrategyUserScope): Promise<void> {
     return this.upsertCredential("nicehash", credentials, scope);
-  }
-
-  deleteBinanceCredentials(scope?: StrategyUserScope): Promise<void> {
-    return this.deleteCredential("binance", scope);
   }
 
   deleteNicehashCredentials(scope?: StrategyUserScope): Promise<void> {

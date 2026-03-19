@@ -1,4 +1,4 @@
-import { publicGet } from "../binanceClient.js";
+import { fetchHistoricalCandles } from "../publicMarketData.js";
 import { round, toUpperSymbol } from "./allocation-utils.js";
 import { StrategyRepository } from "./strategy-repository.js";
 import {
@@ -76,7 +76,7 @@ function buildTimestamps(startIso: string, endIso: string, timeframe: "1h" | "1d
 function basePriceForSymbol(symbol: string): number {
   if (symbol === "BTC") return 55_000;
   if (symbol === "ETH") return 3_100;
-  if (symbol === "BNB") return 510;
+  if (symbol === "XRP") return 0.65;
   if (symbol === "SOL") return 150;
   if (symbol === "ADA") return 0.65;
   if (STABLE_PRICE_SYMBOLS.has(symbol)) return 1;
@@ -279,16 +279,6 @@ function buildSyntheticStableCandles(
   }));
 }
 
-function toBinanceSymbol(symbol: string): string {
-  if (symbol.endsWith("USDT")) {
-    return symbol;
-  }
-  if (symbol.endsWith("USDC")) {
-    return symbol.replace(/USDC$/, "USDT");
-  }
-  return `${symbol}USDT`;
-}
-
 async function wait(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -325,60 +315,27 @@ export class PersistedHistoricalCandleProvider implements HistoricalCandleProvid
     startTime: number,
     endTime: number
   ): Promise<HistoricalCandle[]> {
-    const step = intervalToMs(interval);
-    const binanceSymbol = toBinanceSymbol(symbol);
-    const fetched: HistoricalCandle[] = [];
-    let cursor = alignOpenTime(startTime, interval);
+    let attempt = 0;
 
-    while (cursor <= endTime) {
-      const requestEndTime = Math.min(endTime + step - 1, cursor + step * FETCH_LIMIT - 1);
-      let rows: unknown[] = [];
-      let attempt = 0;
-
-      while (attempt < MAX_RETRIES) {
-        attempt += 1;
-        try {
-          await this.throttle();
-          const response = (await publicGet("/api/v3/klines", {
-            symbol: binanceSymbol,
-            interval,
-            startTime: cursor,
-            endTime: requestEndTime,
-            limit: FETCH_LIMIT,
-          })) as unknown;
-
-          rows = Array.isArray(response) ? response : [];
-          break;
-        } catch (error) {
-          if (attempt >= MAX_RETRIES) {
-            throw new Error(
-              `Failed to fetch ${symbol} ${interval} candles after ${MAX_RETRIES} attempts: ${
-                error instanceof Error ? error.message : "unknown error"
-              }`
-            );
-          }
-
-          await wait(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+    while (attempt < MAX_RETRIES) {
+      attempt += 1;
+      try {
+        await this.throttle();
+        return await fetchHistoricalCandles(symbol, interval, startTime, endTime);
+      } catch (error) {
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(
+            `Failed to fetch ${symbol} ${interval} candles after ${MAX_RETRIES} attempts: ${
+              error instanceof Error ? error.message : "unknown error"
+            }`
+          );
         }
-      }
 
-      const normalized = rows
-        .map((row) => normalizeFetchedCandle(symbol, interval, row))
-        .filter((entry): entry is HistoricalCandle => entry !== null);
-
-      if (normalized.length === 0) {
-        break;
-      }
-
-      fetched.push(...normalized);
-      cursor = normalized[normalized.length - 1].openTime + step;
-
-      if (normalized.length < FETCH_LIMIT) {
-        break;
+        await wait(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
       }
     }
 
-    return fetched;
+    return [];
   }
 
   async getCandles(

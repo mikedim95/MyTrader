@@ -1,5 +1,4 @@
-import { publicGet } from "../binanceClient.js";
-import { getMarketCapForSymbol, getTickerSnapshot } from "../portfolioService.js";
+import { fetchHistoricalCandles, getMarketCapForSymbol, getTickerSnapshot } from "../publicMarketData.js";
 import { detectMarketRegime } from "./strategy-regime.js";
 import type {
   HistoricalMarketPoint,
@@ -20,27 +19,12 @@ const BTC_CONTEXT_HISTORY_DAYS = 400;
 const BTC_DOMINANCE_LOOKBACK_DAYS = 31;
 const LIVE_CONTEXT_CACHE_TTL_MS = 60_000;
 const DAILY_CLOSE_CACHE_TTL_MS = 5 * 60_000;
-export const BTC_CONTEXT_SYMBOLS = ["BTC", "ETH", "BNB", "SOL", "ADA"] as const;
+export const BTC_CONTEXT_SYMBOLS = ["BTC", "ETH", "XRP", "SOL", "ADA"] as const;
 const BTC_HALVING_DATES = [
   "2012-11-28T00:00:00.000Z",
   "2016-07-09T00:00:00.000Z",
   "2020-05-11T00:00:00.000Z",
   "2024-04-20T00:00:00.000Z",
-];
-
-type BinanceKline = [
-  number,
-  string,
-  string,
-  string,
-  string,
-  string,
-  number,
-  string,
-  number,
-  string,
-  string,
-  string
 ];
 
 let cachedLiveContext:
@@ -196,15 +180,13 @@ async function fetchDailyCloses(symbol: string, limit: number, fallbackClose: nu
   }
 
   try {
-    const klines = await publicGet<BinanceKline[]>("/api/v3/klines", {
-      symbol: `${normalizedSymbol}USDT`,
-      interval: "1d",
-      limit,
-    });
-    if (klines.length === 0) {
+    const now = Date.now();
+    const startTime = now - (limit - 1) * DAY_MS;
+    const candles = await fetchHistoricalCandles(normalizedSymbol, "1d", startTime, now);
+    if (candles.length === 0) {
       return Array.from({ length: limit }, () => round(fallbackClose, 6));
     }
-    const closes = klines.map((kline) => round(Number(kline[4]), 6));
+    const closes = candles.slice(-limit).map((candle) => round(candle.close, 6));
     dailyCloseCache.set(cacheKey, {
       expiresAt: Date.now() + DAILY_CLOSE_CACHE_TTL_MS,
       closes,
@@ -274,7 +256,7 @@ export async function buildLiveStrategyMarketContext(
 
   const tickerSnapshots = await Promise.all(
     BTC_CONTEXT_SYMBOLS.map(async (symbol) => {
-      const ticker = await getTickerSnapshot(symbol, null).catch(() => ({ price: 0, change24h: 0, volume24h: 0 }));
+      const ticker = await getTickerSnapshot(symbol).catch(() => ({ price: 0, change24h: 0, volume24h: 0 }));
       return [symbol, ticker.price] as const;
     })
   );

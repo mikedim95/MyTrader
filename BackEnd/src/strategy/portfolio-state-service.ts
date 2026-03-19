@@ -11,7 +11,7 @@ import {
 } from "./types.js";
 
 const DEFAULT_DEMO_CAPITAL = 10_000;
-const DEFAULT_DEMO_ALLOCATION = "BTC:40,ETH:30,BNB:10,USDC:20";
+const DEFAULT_DEMO_ALLOCATION = "BTC:40,ETH:30,XRP:10,USDC:20";
 const STABLE_COINS = new Set(["USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI"]);
 
 function parsePositiveFloat(value: number | string | undefined, fallback: number): number {
@@ -112,7 +112,7 @@ export async function createDemoAccountHoldings(
   const tickerEntries = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const ticker = await getTickerSnapshot(symbol, null);
+        const ticker = await getTickerSnapshot(symbol);
         return [symbol, ticker] as const;
       } catch {
         return [symbol, { price: STABLE_COINS.has(symbol) ? 1 : 0, change24h: 0, volume24h: 0 }] as const;
@@ -216,7 +216,7 @@ export async function getDemoPortfolioState(
   const tickerEntries = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const ticker = await getTickerSnapshot(symbol, null);
+        const ticker = await getTickerSnapshot(symbol);
         return [symbol, ticker] as const;
       } catch {
         return [symbol, { price: STABLE_COINS.has(symbol) ? 1 : 0, change24h: 0, volume24h: 0 }] as const;

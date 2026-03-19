@@ -12,7 +12,7 @@ const presetInputs: unknown[] = [
     baseAllocation: {
       BTC: 40,
       ETH: 25,
-      BNB: 10,
+      XRP: 10,
       SOL: 10,
       USDC: 15,
     },
@@ -75,7 +75,7 @@ const presetInputs: unknown[] = [
       BTC: 45,
       ETH: 25,
       SOL: 10,
-      BNB: 10,
+      XRP: 10,
       USDC: 10,
     },
     rules: [
@@ -138,7 +138,7 @@ const presetInputs: unknown[] = [
       BTC: 35,
       ETH: 30,
       SOL: 10,
-      BNB: 10,
+      XRP: 10,
       ADA: 5,
       USDC: 10,
     },
@@ -217,7 +217,7 @@ const presetInputs: unknown[] = [
     baseAllocation: {
       BTC: 35,
       ETH: 25,
-      BNB: 10,
+      XRP: 10,
       SOL: 10,
       USDC: 20,
     },
@@ -315,7 +315,7 @@ const presetInputs: unknown[] = [
     baseAllocation: {
       BTC: 45,
       ETH: 25,
-      BNB: 10,
+      XRP: 10,
       SOL: 5,
       USDC: 15,
     },
@@ -344,7 +344,7 @@ const presetInputs: unknown[] = [
     baseAllocation: {
       BTC: 35,
       ETH: 25,
-      BNB: 10,
+      XRP: 10,
       SOL: 15,
       USDC: 15,
     },
@@ -408,7 +408,7 @@ const presetInputs: unknown[] = [
     baseAllocation: {
       BTC: 40,
       ETH: 25,
-      BNB: 10,
+      XRP: 10,
       SOL: 10,
       USDC: 15,
     },

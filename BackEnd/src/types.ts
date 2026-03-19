@@ -91,12 +91,6 @@ export interface OrdersResponse {
   orders: Order[];
 }
 
-export interface BinanceCredentials {
-  apiKey: string;
-  apiSecret: string;
-  testnet: boolean;
-}
-
 export interface NicehashCredentials {
   apiKey: string;
   apiSecret: string;

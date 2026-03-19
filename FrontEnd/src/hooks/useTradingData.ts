@@ -80,20 +80,11 @@ export function useSignalReview(accountType: PortfolioAccountType = "real", limi
   });
 }
 
-export function useBinanceConnection() {
-  return useQuery({
-    queryKey: ["binance-connection"],
-    queryFn: backendApi.getBinanceConnection,
-    staleTime: 5_000,
-    refetchInterval: 15_000,
-    retry: false,
-  });
-}
-
-export function useNicehashConnection() {
+export function useNicehashConnection(enabled = true) {
   return useQuery({
     queryKey: ["nicehash-connection"],
     queryFn: backendApi.getNicehashConnection,
+    enabled,
     staleTime: 5_000,
     refetchInterval: 15_000,
     retry: false,

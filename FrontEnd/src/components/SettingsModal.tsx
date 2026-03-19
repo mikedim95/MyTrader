@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useBinanceConnection, useNicehashConnection } from "@/hooks/useTradingData";
+import { useNicehashConnection } from "@/hooks/useTradingData";
 import { backendApi } from "@/lib/api";
 
 const otherExchanges = ["Coinbase", "Kraken"];
@@ -22,18 +22,10 @@ function formatSource(source: string): string {
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const queryClient = useQueryClient();
-  const { data: binanceConnection } = useBinanceConnection();
-  const { data: nicehashConnection } = useNicehashConnection();
-  const isBinanceConnected = binanceConnection?.connected ?? false;
-  const binanceSource = binanceConnection?.source ?? "none";
-  const isTestnet = binanceConnection?.testnet ?? false;
+  const { data: nicehashConnection } = useNicehashConnection(open);
   const isNicehashConnected = nicehashConnection?.connected ?? false;
   const nicehashSource = nicehashConnection?.source ?? "none";
 
-  const [binanceApiKey, setBinanceApiKey] = useState("");
-  const [binanceApiSecret, setBinanceApiSecret] = useState("");
-  const [testnet, setTestnet] = useState(false);
-  const [binanceMessage, setBinanceMessage] = useState<string | null>(null);
   const [nicehashApiKey, setNicehashApiKey] = useState("");
   const [nicehashApiSecret, setNicehashApiSecret] = useState("");
   const [nicehashOrganizationId, setNicehashOrganizationId] = useState("");
@@ -53,52 +45,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
-  const refreshBinanceData = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["binance-connection"] }),
-      queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
-      queryClient.invalidateQueries({ queryKey: ["orders"] }),
-    ]);
-  };
-
   const refreshNicehashData = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["nicehash-connection"] }),
       queryClient.invalidateQueries({ queryKey: ["nicehash-overview"] }),
     ]);
   };
-
-  const connectMutation = useMutation({
-    mutationFn: async () => {
-      const result = await backendApi.connectBinance({
-        apiKey: binanceApiKey.trim(),
-        apiSecret: binanceApiSecret.trim(),
-        testnet,
-      });
-      return result;
-    },
-    onSuccess: async (next) => {
-      setBinanceApiSecret("");
-      setBinanceMessage(next.connected ? "Binance credentials saved for this user." : next.message ?? "Connection failed.");
-      await refreshBinanceData();
-    },
-    onError: (error) => {
-      setBinanceMessage(getErrorMessage(error));
-    },
-  });
-
-  const disconnectMutation = useMutation({
-    mutationFn: backendApi.disconnectBinance,
-    onSuccess: async (next) => {
-      setBinanceMessage(
-        next.connected ? "Stored credentials removed. Environment credentials are still active." : "Stored Binance credentials removed."
-      );
-      await refreshBinanceData();
-    },
-    onError: (error) => {
-      setBinanceMessage(getErrorMessage(error));
-    },
-  });
 
   const connectNicehashMutation = useMutation({
     mutationFn: async () => {
@@ -135,7 +87,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   if (!open) return null;
 
-  const isBinanceBusy = connectMutation.isPending || disconnectMutation.isPending;
   const isNicehashBusy = connectNicehashMutation.isPending || disconnectNicehashMutation.isPending;
 
   const cardClassName = "rounded-xl border border-border bg-card p-4 sm:p-5 space-y-4";
@@ -160,7 +111,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <div className="text-[11px] font-mono uppercase tracking-[0.26em] text-muted-foreground">Settings</div>
               <h3 className="mt-2 text-lg sm:text-xl font-semibold text-foreground">User-scoped integrations</h3>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                Manage exchange and mining credentials without leaving the current workspace.
+                Manage mining credentials without leaving the current workspace.
               </p>
             </div>
             <button
@@ -175,69 +126,6 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
             <div className="mx-auto w-full max-w-3xl space-y-4 sm:space-y-5">
               <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">User-scoped connections</div>
-
-              <div className={cardClassName}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-mono font-semibold text-foreground">Binance</div>
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Source: {formatSource(binanceSource)} {isTestnet ? "(Testnet)" : "(Mainnet)"}
-                    </div>
-                  </div>
-                  <span
-                    className={`inline-flex w-fit text-[11px] font-mono px-2.5 py-1 rounded ${
-                      isBinanceConnected ? "bg-positive/10 text-positive" : "bg-secondary text-muted-foreground"
-                    }`}
-                  >
-                    {isBinanceConnected ? "Connected" : "Disconnected"}
-                  </span>
-                </div>
-
-                {binanceConnection?.message ? <div className="text-xs text-muted-foreground">{binanceConnection.message}</div> : null}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
-                    <input
-                      value={binanceApiKey}
-                      onChange={(event) => setBinanceApiKey(event.target.value)}
-                      className={inputClassName}
-                      placeholder="Enter Binance API key..."
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Secret</label>
-                    <input
-                      type="password"
-                      value={binanceApiSecret}
-                      onChange={(event) => setBinanceApiSecret(event.target.value)}
-                      className={inputClassName}
-                      placeholder="Enter Binance API secret..."
-                      autoComplete="off"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <input type="checkbox" checked={testnet} onChange={(event) => setTestnet(event.target.checked)} className="h-4 w-4 shrink-0" />
-                    Use Binance testnet
-                  </label>
-                </div>
-
-                <div className={buttonRowClassName}>
-                  <button
-                    onClick={() => connectMutation.mutate()}
-                    disabled={isBinanceBusy || !binanceApiKey.trim() || !binanceApiSecret.trim()}
-                    className={primaryButtonClassName}
-                  >
-                    {connectMutation.isPending ? "Connecting..." : "Connect"}
-                  </button>
-                  <button onClick={() => disconnectMutation.mutate()} disabled={isBinanceBusy} className={secondaryButtonClassName}>
-                    {disconnectMutation.isPending ? "Disconnecting..." : "Disconnect"}
-                  </button>
-                </div>
-
-                {binanceMessage ? <div className="text-xs text-muted-foreground">{binanceMessage}</div> : null}
-              </div>
 
               <div className={cardClassName}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -323,7 +211,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm font-mono text-foreground">{exchange}</span>
                     <span className="inline-flex w-fit text-[11px] font-mono px-2.5 py-1 rounded bg-secondary text-muted-foreground">
-                      Coming soon
+                      Public only
                     </span>
                   </div>
                 </div>

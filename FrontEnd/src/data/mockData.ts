@@ -38,7 +38,7 @@ export const assets: Asset[] = [
   { id: "btc", symbol: "BTC", name: "Bitcoin", price: 67432.18, change24h: 2.34, volume24h: 28_400_000_000, marketCap: 1_320_000_000_000, balance: 1.2453, value: 83_987.45, allocation: 42.1, targetAllocation: 40, sparkline: spark(67000, 1500) },
   { id: "eth", symbol: "ETH", name: "Ethereum", price: 3521.67, change24h: -1.12, volume24h: 15_200_000_000, marketCap: 423_000_000_000, balance: 12.847, value: 45_240.87, allocation: 22.7, targetAllocation: 25, sparkline: spark(3550, -40) },
   { id: "sol", symbol: "SOL", name: "Solana", price: 178.43, change24h: 5.67, volume24h: 3_800_000_000, marketCap: 78_000_000_000, balance: 156.32, value: 27_888.94, allocation: 14.0, targetAllocation: 15, sparkline: spark(170, 8) },
-  { id: "bnb", symbol: "BNB", name: "BNB", price: 612.89, change24h: 0.89, volume24h: 1_900_000_000, marketCap: 94_000_000_000, balance: 23.41, value: 14_347.78, allocation: 7.2, targetAllocation: 8, sparkline: spark(610, 5) },
+  { id: "xrp", symbol: "XRP", name: "XRP", price: 0.6231, change24h: 1.21, volume24h: 2_300_000_000, marketCap: 40_000_000_000, balance: 23000, value: 14_331.3, allocation: 7.2, targetAllocation: 8, sparkline: spark(0.61, 0.02) },
   { id: "ada", symbol: "ADA", name: "Cardano", price: 0.6234, change24h: -2.45, volume24h: 890_000_000, marketCap: 22_000_000_000, balance: 15420, value: 9_616.95, allocation: 4.8, targetAllocation: 5, sparkline: spark(0.64, -0.015) },
   { id: "usdt", symbol: "USDT", name: "Tether", price: 1.0001, change24h: 0.01, volume24h: 52_000_000_000, marketCap: 112_000_000_000, balance: 18342.56, value: 18_344.39, allocation: 9.2, targetAllocation: 7, sparkline: spark(1, 0) },
 ];
@@ -56,7 +56,7 @@ export const orders: Order[] = [
   { id: "1", time: "2024-03-10 14:32", pair: "BTC/USDT", side: "Buy", price: 67200, amount: 0.15, status: "Filled" },
   { id: "2", time: "2024-03-10 13:18", pair: "ETH/USDT", side: "Sell", price: 3540, amount: 2.5, status: "Filled" },
   { id: "3", time: "2024-03-10 12:05", pair: "SOL/USDT", side: "Buy", price: 175.2, amount: 10, status: "Pending" },
-  { id: "4", time: "2024-03-10 10:44", pair: "BNB/USDT", side: "Buy", price: 608, amount: 3, status: "Filled" },
+  { id: "4", time: "2024-03-10 10:44", pair: "XRP/USDT", side: "Buy", price: 0.62, amount: 5000, status: "Filled" },
   { id: "5", time: "2024-03-09 22:15", pair: "ADA/USDT", side: "Sell", price: 0.635, amount: 5000, status: "Cancelled" },
   { id: "6", time: "2024-03-09 18:30", pair: "BTC/USDT", side: "Buy", price: 66800, amount: 0.25, status: "Filled" },
   { id: "7", time: "2024-03-09 15:12", pair: "ETH/USDT", side: "Buy", price: 3480, amount: 5, status: "Filled" },
@@ -73,7 +73,7 @@ export const recentActivity: Activity[] = [
 export const marketMovers = [
   { symbol: "SOL", name: "Solana", change: 5.67 },
   { symbol: "BTC", name: "Bitcoin", change: 2.34 },
-  { symbol: "BNB", name: "BNB", change: 0.89 },
+  { symbol: "XRP", name: "XRP", change: 1.21 },
   { symbol: "ADA", name: "Cardano", change: -2.45 },
   { symbol: "ETH", name: "Ethereum", change: -1.12 },
 ];

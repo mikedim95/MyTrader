@@ -3,7 +3,7 @@ import { AllocationMap } from "./types.js";
 export const ALLOCATION_BASIS_POINTS = 10_000;
 
 export const DEFAULT_STABLECOINS = new Set(["USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI"]);
-export const DEFAULT_LARGE_CAPS = new Set(["BTC", "ETH", "BNB", "XRP", "SOL", "ADA"]);
+export const DEFAULT_LARGE_CAPS = new Set(["BTC", "ETH", "XRP", "SOL", "ADA", "DOT"]);
 
 export function round(value: number, decimals: number): number {
   return Number(value.toFixed(decimals));

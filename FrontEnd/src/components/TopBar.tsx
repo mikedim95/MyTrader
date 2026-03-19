@@ -26,7 +26,7 @@ const DEFAULT_DEMO_BALANCE = 10_000;
 const DEFAULT_DEMO_ALLOCATION_TEMPLATE = [
   { symbol: "BTC", percent: 40 },
   { symbol: "ETH", percent: 30 },
-  { symbol: "BNB", percent: 10 },
+  { symbol: "XRP", percent: 10 },
   { symbol: "USDC", percent: 20 },
 ];
 
@@ -269,12 +269,14 @@ export function TopBar({ accountType, onAccountTypeChange, session, onLogout, on
               Demo
             </button>
             <button
-              onClick={() => onAccountTypeChange("real")}
+              type="button"
+              disabled
               className={cn(
                 "relative z-10 rounded-full px-3 py-1.5 text-xs font-mono uppercase tracking-widest transition-colors duration-300",
                 isMobile ? "w-16" : "w-20",
-                accountType === "real" ? "text-[hsl(30,100%,60%)] font-semibold" : "text-muted-foreground hover:text-foreground"
+                "cursor-not-allowed text-muted-foreground/60"
               )}
+              title="Live exchange account mode is unavailable."
             >
               Live
             </button>

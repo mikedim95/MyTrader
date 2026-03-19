@@ -3,7 +3,6 @@ import type { TradingAmountMode, TradingAssetAvailability } from "@/types/api";
 export const COMMON_SYMBOL_SUGGESTIONS = [
   "BTC",
   "ETH",
-  "BNB",
   "SOL",
   "XRP",
   "ADA",
@@ -38,7 +37,7 @@ export const COMMON_SYMBOL_SUGGESTIONS = [
   "FDUSD",
 ];
 
-export const QUOTE_PRIORITY = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB"];
+export const QUOTE_PRIORITY = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "XRP"];
 export const STABLE_SYMBOLS = new Set(["USDT", "USDC", "FDUSD", "BUSD", "TUSD", "DAI"]);
 
 export function normalizeSymbolInput(value: string): string {
@@ -87,7 +86,7 @@ export function amountModeLabel(mode: TradingAmountMode, buyingAsset: string, se
 export function executionRouteLabel(executionSymbol: string | null, executionSide: "BUY" | "SELL" | null): string {
   if (!executionSymbol || !executionSide) return "Preview only";
 
-  const quoteCandidates = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB"];
+  const quoteCandidates = ["USDT", "USDC", "FDUSD", "BTC", "ETH", "XRP"];
   const quote = quoteCandidates.find((candidate) => executionSymbol.endsWith(candidate)) ?? "";
   const base = quote ? executionSymbol.slice(0, -quote.length) : executionSymbol;
   return `${base}/${quote || "?"} ${executionSide}`;

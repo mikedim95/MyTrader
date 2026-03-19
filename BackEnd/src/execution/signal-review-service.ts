@@ -657,7 +657,7 @@ export class SignalOutcomeService {
 
   private async resolveLivePrice(asset: string): Promise<number | null> {
     try {
-      const ticker = await getTickerSnapshot(asset.trim().toUpperCase(), null);
+      const ticker = await getTickerSnapshot(asset.trim().toUpperCase());
       return round(ticker.price, 8);
     } catch {
       return null;

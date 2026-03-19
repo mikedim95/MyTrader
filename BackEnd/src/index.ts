@@ -2,12 +2,6 @@ import "dotenv/config";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import {
-  clearUserCredentials,
-  getConnectionStatus,
-  storeUserCredentials,
-  validateCredentials,
-} from "./binanceClient.js";
-import {
   clearNicehashCredentials,
   getNicehashConnectionStatus,
   storeNicehashCredentials,
@@ -339,51 +333,6 @@ app.post("/api/session/signup", async (req, res) => {
       },
     });
   }
-});
-
-app.get("/api/binance/connection", async (req, res) => {
-  const userScope = resolveStrategyUserScope(req);
-  const connection = await getConnectionStatus(userScope);
-  res.json(connection);
-});
-
-app.post("/api/binance/connection", async (req, res) => {
-  const userScope = requireUserScope(req, res);
-  if (!userScope) return;
-
-  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
-  const apiSecret = typeof req.body?.apiSecret === "string" ? req.body.apiSecret.trim() : "";
-  const testnet = Boolean(req.body?.testnet);
-
-  if (!apiKey || !apiSecret) {
-    res.status(400).json({
-      message: "Both apiKey and apiSecret are required.",
-    });
-    return;
-  }
-
-  try {
-    const credentials = { apiKey, apiSecret, testnet };
-    await validateCredentials(credentials);
-
-    const connection = await storeUserCredentials(userScope, credentials);
-    res.json(connection);
-  } catch (error) {
-    res.status(400).json({
-      connected: false,
-      source: "stored",
-      testnet,
-      message: error instanceof Error ? error.message : "Unable to validate Binance credentials.",
-    });
-  }
-});
-
-app.delete("/api/binance/connection", async (req, res) => {
-  const userScope = requireUserScope(req, res);
-  if (!userScope) return;
-
-  const connection = await clearUserCredentials(userScope);
-  res.json(connection);
 });
 
 app.get("/api/dashboard", async (req, res) => {

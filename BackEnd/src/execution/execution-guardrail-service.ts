@@ -368,7 +368,7 @@ export class ExecutionGuardrailService {
     }
 
     try {
-      const ticker = await getTickerSnapshot(asset, null);
+      const ticker = await getTickerSnapshot(asset);
       return round(ticker.price, 8);
     } catch {
       return null;

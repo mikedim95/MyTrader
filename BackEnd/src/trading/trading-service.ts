@@ -1,37 +1,8 @@
-import { getActiveCredentials, signedGet, signedPost } from "../binanceClient.js";
 import { getAssetUsdSnapshot, getNameForSymbol, getTradingPairSnapshot } from "../portfolioService.js";
 import { getPortfolioState } from "../strategy/portfolio-state-service.js";
 import type { StrategyRepository } from "../strategy/strategy-repository.js";
 import type { StrategyUserScope } from "../strategy/strategy-user-scope.js";
 import type { DemoAccountHolding, PortfolioAccountType, RebalanceAllocationProfile } from "../strategy/types.js";
-
-interface BinanceAccountBalance {
-  asset: string;
-  free: string;
-  locked: string;
-}
-
-interface BinanceAccountResponse {
-  balances: BinanceAccountBalance[];
-}
-
-interface BinanceOrderFill {
-  price: string;
-  qty: string;
-  commission: string;
-  commissionAsset: string;
-}
-
-interface BinanceOrderResponse {
-  symbol: string;
-  orderId: number;
-  status: string;
-  side: "BUY" | "SELL";
-  executedQty?: string;
-  cummulativeQuoteQty?: string;
-  transactTime?: number;
-  fills?: BinanceOrderFill[];
-}
 
 export type TradingAmountMode = "selling_asset" | "buying_asset" | "buying_asset_usdt";
 
@@ -149,16 +120,6 @@ function roundUsd(value: number): number {
   return round(value, 2);
 }
 
-function toNumber(value: string | number | undefined): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatOrderNumber(value: number): string {
-  const rounded = round(value, 8);
-  return rounded.toFixed(8).replace(/\.?0+$/, "");
-}
-
 function buildExecutionRoute(
   buyingAsset: string,
   sellingAsset: string,
@@ -222,7 +183,7 @@ async function priceForSymbol(symbol: string): Promise<number> {
   }
 
   try {
-    const snapshot = await getAssetUsdSnapshot(symbol, null);
+    const snapshot = await getAssetUsdSnapshot(symbol);
     return round(snapshot.price, 8);
   } catch {
     return 0;
@@ -278,67 +239,10 @@ export class TradingService {
       };
     }
 
-    const { credentials } = await getActiveCredentials(userScope);
-    if (!credentials) {
-      return {
-        accountType,
-        assets: [],
-        bySymbol: new Map(),
-      };
-    }
-
-    const [account, portfolio] = await Promise.all([
-      signedGet<BinanceAccountResponse>("/api/v3/account", {}, credentials),
-      getPortfolioState("real", "USDC", { userScope }),
-    ]);
-
-    const portfolioBySymbol = new Map(
-      portfolio.assets.map((asset) => [normalizeSymbol(asset.symbol), asset])
-    );
-
-    const rawBalances = account.balances
-      .map((balance) => ({
-        symbol: normalizeSymbol(balance.asset),
-        freeAmount: toNumber(balance.free),
-        lockedAmount: toNumber(balance.locked),
-      }))
-      .filter((balance) => balance.freeAmount > 0 || balance.lockedAmount > 0);
-
-    const assetSymbols = new Set<string>([
-      ...rawBalances.map((asset) => asset.symbol),
-      ...portfolioBySymbol.keys(),
-    ]);
-
-    const assets = await Promise.all(
-      Array.from(assetSymbols).map(async (symbol) => {
-        const liveBalance = rawBalances.find((asset) => asset.symbol === symbol);
-        const portfolioAsset = portfolioBySymbol.get(symbol);
-        const totalAmount = liveBalance ? liveBalance.freeAmount + liveBalance.lockedAmount : portfolioAsset?.quantity ?? 0;
-        const freeAmount = liveBalance?.freeAmount ?? totalAmount;
-        const lockedAmount = liveBalance?.lockedAmount ?? 0;
-        const priceUsd = portfolioAsset?.price ?? (await priceForSymbol(symbol));
-
-        return {
-          symbol,
-          name: getNameForSymbol(symbol),
-          totalAmount: round(totalAmount, 10),
-          reservedAmount: 0,
-          freeAmount: round(freeAmount, 10),
-          lockedAmount: round(lockedAmount, 10),
-          priceUsd: round(priceUsd, 8),
-          totalValueUsd: roundUsd(totalAmount * priceUsd),
-          reservedValueUsd: 0,
-          freeValueUsd: roundUsd(freeAmount * priceUsd),
-        };
-      })
-    );
-
-    assets.sort((left, right) => right.freeValueUsd - left.freeValueUsd || left.symbol.localeCompare(right.symbol));
-
     return {
       accountType,
-      assets,
-      bySymbol: new Map(assets.map((asset) => [asset.symbol, asset])),
+      assets: [],
+      bySymbol: new Map(),
     };
   }
 
@@ -363,8 +267,7 @@ export class TradingService {
     const normalizedBase = normalizeSymbol(baseSymbol);
     const normalizedQuote = normalizeSymbol(quoteSymbol);
     const snapshot = await this.getAvailabilitySnapshot(accountType, userScope);
-    const { credentials } = await getActiveCredentials(userScope);
-    const pairSnapshot = await getTradingPairSnapshot(normalizedBase, normalizedQuote, credentials);
+    const pairSnapshot = await getTradingPairSnapshot(normalizedBase, normalizedQuote);
     const executionRoute = buildExecutionRoute(normalizedBase, normalizedQuote, pairSnapshot.pricingSource);
     const baseAvailability = snapshot.bySymbol.get(normalizedBase) ?? buildEmptyAvailability(normalizedBase, pairSnapshot.base.price);
     const quoteAvailability = snapshot.bySymbol.get(normalizedQuote) ?? buildEmptyAvailability(normalizedQuote, pairSnapshot.quote.price);
@@ -419,8 +322,7 @@ export class TradingService {
     }
 
     const snapshot = await this.getAvailabilitySnapshot(input.accountType, userScope);
-    const { credentials } = await getActiveCredentials(userScope);
-    const pairSnapshot = await getTradingPairSnapshot(buyingAsset, sellingAsset, credentials);
+    const pairSnapshot = await getTradingPairSnapshot(buyingAsset, sellingAsset);
     const route = buildExecutionRoute(buyingAsset, sellingAsset, pairSnapshot.pricingSource);
 
     const buyingAvailability =
@@ -463,8 +365,8 @@ export class TradingService {
       blockingReasons.push("The requested trade amount is too small to preview.");
     }
 
-    if (input.accountType === "real" && !credentials) {
-      blockingReasons.push("Binance credentials are not configured for live execution.");
+    if (input.accountType === "real") {
+      blockingReasons.push("Live exchange execution is unavailable.");
     }
 
     if (input.accountType === "demo" && sellingAvailability.freeAmount <= 0) {
@@ -582,60 +484,6 @@ export class TradingService {
       };
     }
 
-    const { credentials } = await getActiveCredentials(userScope);
-    if (!credentials || !preview.executionSymbol || !preview.executionSide) {
-      throw new Error("Live execution is not available without valid Binance credentials and a directly tradable market.");
-    }
-
-    const orderResponse =
-      preview.executionSide === "BUY"
-        ? await signedPost<BinanceOrderResponse>(
-            "/api/v3/order",
-            {
-              symbol: preview.executionSymbol,
-              side: "BUY",
-              type: "MARKET",
-              quoteOrderQty: formatOrderNumber(preview.sellAmount),
-              newOrderRespType: "FULL",
-            },
-            credentials
-          )
-        : await signedPost<BinanceOrderResponse>(
-            "/api/v3/order",
-            {
-              symbol: preview.executionSymbol,
-              side: "SELL",
-              type: "MARKET",
-              quantity: formatOrderNumber(preview.sellAmount),
-              newOrderRespType: "FULL",
-            },
-            credentials
-          );
-
-    const executedBuyAmount =
-      preview.executionSide === "BUY"
-        ? toNumber(orderResponse.executedQty)
-        : toNumber(orderResponse.cummulativeQuoteQty);
-    const executedSellAmount =
-      preview.executionSide === "BUY"
-        ? toNumber(orderResponse.cummulativeQuoteQty)
-        : toNumber(orderResponse.executedQty);
-
-    return {
-      accountType: "real",
-      preview,
-      execution: {
-        status: "completed",
-        orderId: orderResponse.orderId ? String(orderResponse.orderId) : null,
-        symbol: orderResponse.symbol ?? preview.executionSymbol,
-        side: orderResponse.side ?? preview.executionSide,
-        executedBuyAmount: round(executedBuyAmount, 8),
-        executedSellAmount: round(executedSellAmount, 8),
-        executedBuyWorthUsdt: roundUsd(executedBuyAmount * preview.buyingAsset.priceUsd),
-        message: `Market order executed on ${preview.executionSymbol}.`,
-        executedAt: orderResponse.transactTime ? new Date(orderResponse.transactTime).toISOString() : new Date().toISOString(),
-        raw: orderResponse,
-      },
-    };
+    throw new Error("Live exchange execution is unavailable.");
   }
 }

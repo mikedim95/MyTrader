@@ -81,12 +81,6 @@ function resolveUserScope(): { userId?: number; username?: string } {
   return { username: session.username };
 }
 
-interface ConnectRequest {
-  apiKey: string;
-  apiSecret: string;
-  testnet: boolean;
-}
-
 interface NicehashConnectRequest {
   apiKey: string;
   apiSecret: string;
@@ -305,16 +299,6 @@ export const backendApi = {
     apiRequest<{ ok: boolean; minerId: string; source: string; data: MinerPresetOption[]; fetchedAt: string; latencyMs: number }>(
       `/api/miners/${minerId}/autotune-presets`
     ),
-  getBinanceConnection: () => apiRequest<ConnectionStatus>("/api/binance/connection"),
-  connectBinance: (body: ConnectRequest) =>
-    apiRequest<ConnectionStatus>("/api/binance/connection", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  disconnectBinance: () =>
-    apiRequest<ConnectionStatus>("/api/binance/connection", {
-      method: "DELETE",
-    }),
   getNicehashConnection: () => apiRequest<NicehashConnectionStatus>("/api/nicehash/connection"),
   connectNicehash: (body: NicehashConnectRequest) =>
     apiRequest<NicehashConnectionStatus>("/api/nicehash/connection", {
@@ -471,4 +455,4 @@ export const backendApi = {
     apiRequest<BacktestMetricsResponse>(`/api/backtests/${backtestId}/metrics`),
 };
 
-export type { ConnectRequest, NicehashConnectRequest };
+export type { NicehashConnectRequest };
