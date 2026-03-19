@@ -10,7 +10,8 @@ export class MinerPollingService {
   constructor(
     private readonly repository: MinerRepository,
     private readonly readService: MinerReadService,
-    private readonly pollIntervalMs = 15_000
+    private readonly pollIntervalMs = 15_000,
+    private readonly pollConcurrency = 3
   ) {}
 
   start(): void {
@@ -71,40 +72,48 @@ export class MinerPollingService {
 
     try {
       const miners = await this.repository.listEnabledMiners();
-      const results = await Promise.allSettled(
-        miners.map(async (miner) => {
-          const readResult = await this.readService.readMiner(miner);
+      const results: PromiseSettledResult<void>[] = [];
+      const safeConcurrency = Math.max(1, Math.floor(this.pollConcurrency));
 
-          if (!readResult.httpOk && !readResult.cgminerOk) {
-            throw new Error("Both VNish HTTP and CGMiner reads failed.");
-          }
+      for (let index = 0; index < miners.length; index += safeConcurrency) {
+        const minerBatch = miners.slice(index, index + safeConcurrency);
+        const batchResults = await Promise.allSettled(
+          minerBatch.map(async (miner) => {
+            const readResult = await this.readService.readMiner(miner);
 
-          this.failureCounts.set(miner.id, 0);
+            if (!readResult.httpOk && !readResult.cgminerOk) {
+              throw new Error("Both VNish HTTP and CGMiner reads failed.");
+            }
 
-          await this.repository.saveSnapshot({
-            minerId: miner.id,
-            online: readResult.liveData.online,
-            minerState: readResult.liveData.minerState,
-            presetName: readResult.liveData.presetName,
-            presetPretty: readResult.liveData.presetPretty,
-            presetStatus: readResult.liveData.presetStatus,
-            totalRateThs: readResult.liveData.totalRateThs,
-            boardTemps: readResult.liveData.boardTemps,
-            hotspotTemps: readResult.liveData.hotspotTemps,
-            fanPwm: readResult.liveData.fanPwm,
-            fanRpm: readResult.liveData.fanRpm,
-            powerWatts: readResult.liveData.powerWatts,
-            raw: liveDataToSnapshotRaw(readResult.liveData),
-          });
+            this.failureCounts.set(miner.id, 0);
 
-          await this.repository.replacePools(miner.id, normalizePoolsForStorage(readResult.cgminerPools));
-          await this.repository.updateMiner(miner.id, {
-            lastSeenAt: readResult.liveData.lastSeenAt ?? new Date().toISOString(),
-            lastError: null,
-            currentPreset: readResult.liveData.presetName,
-          });
-        })
-      );
+            await this.repository.saveSnapshot({
+              minerId: miner.id,
+              online: readResult.liveData.online,
+              minerState: readResult.liveData.minerState,
+              presetName: readResult.liveData.presetName,
+              presetPretty: readResult.liveData.presetPretty,
+              presetStatus: readResult.liveData.presetStatus,
+              totalRateThs: readResult.liveData.totalRateThs,
+              boardTemps: readResult.liveData.boardTemps,
+              hotspotTemps: readResult.liveData.hotspotTemps,
+              fanPwm: readResult.liveData.fanPwm,
+              fanRpm: readResult.liveData.fanRpm,
+              powerWatts: readResult.liveData.powerWatts,
+              raw: liveDataToSnapshotRaw(readResult.liveData),
+            });
+
+            await this.repository.replacePools(miner.id, normalizePoolsForStorage(readResult.cgminerPools));
+            await this.repository.updateMiner(miner.id, {
+              lastSeenAt: readResult.liveData.lastSeenAt ?? new Date().toISOString(),
+              lastError: null,
+              currentPreset: readResult.liveData.presetName,
+            });
+          })
+        );
+
+        results.push(...batchResults);
+      }
 
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];

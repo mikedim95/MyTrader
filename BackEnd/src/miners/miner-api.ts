@@ -58,6 +58,7 @@ const FLEET_HISTORY_SCOPE_CONFIG = {
 
 const FLEET_SNAPSHOT_CACHE_TTL_MS = 2_000;
 const FLEET_HISTORY_CACHE_TTL_MS = 5_000;
+const MINERS_LIST_CACHE_TTL_MS = 5_000;
 
 type FleetHistoryScope = z.infer<typeof fleetHistoryQuerySchema>["scope"];
 
@@ -70,11 +71,7 @@ function createTimedLoader<T>(ttlMs: number, load: () => Promise<T>): () => Prom
   let cache: TimedCacheEntry<T> | null = null;
   let inFlight: Promise<T> | null = null;
 
-  return async () => {
-    if (cache && cache.expiresAt > Date.now()) {
-      return cache.value;
-    }
-
+  const startRefresh = () => {
     if (inFlight) {
       return inFlight;
     }
@@ -93,6 +90,20 @@ function createTimedLoader<T>(ttlMs: number, load: () => Promise<T>): () => Prom
 
     return inFlight;
   };
+
+  return async () => {
+    const now = Date.now();
+    if (cache) {
+      if (cache.expiresAt > now) {
+        return cache.value;
+      }
+
+      void startRefresh().catch(() => undefined);
+      return cache.value;
+    }
+
+    return startRefresh();
+  };
 }
 
 function createTimedKeyedLoader<K, T>(
@@ -103,13 +114,7 @@ function createTimedKeyedLoader<K, T>(
   const cache = new Map<string, TimedCacheEntry<T>>();
   const inFlight = new Map<string, Promise<T>>();
 
-  return async (key: K) => {
-    const cacheKey = getCacheKey(key);
-    const cached = cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.value;
-    }
-
+  const startRefresh = (cacheKey: string, key: K) => {
     const activeRequest = inFlight.get(cacheKey);
     if (activeRequest) {
       return activeRequest;
@@ -129,6 +134,22 @@ function createTimedKeyedLoader<K, T>(
 
     inFlight.set(cacheKey, request);
     return request;
+  };
+
+  return async (key: K) => {
+    const cacheKey = getCacheKey(key);
+    const cached = cache.get(cacheKey);
+    const now = Date.now();
+    if (cached) {
+      if (cached.expiresAt > now) {
+        return cached.value;
+      }
+
+      void startRefresh(cacheKey, key).catch(() => undefined);
+      return cached.value;
+    }
+
+    return startRefresh(cacheKey, key);
   };
 }
 
@@ -173,6 +194,14 @@ interface MinerApiDeps {
 
 export function createMinerRouter(deps: MinerApiDeps): Router {
   const router = Router();
+
+  const loadMinersList = createTimedLoader<{ miners: MinerEntity[]; generatedAt: string }>(
+    MINERS_LIST_CACHE_TTL_MS,
+    async () => ({
+      miners: await deps.repository.listMiners(),
+      generatedAt: new Date().toISOString(),
+    })
+  );
 
   const loadFleetSnapshot = createTimedLoader<{
     miners: MinerEntity[];
@@ -364,8 +393,8 @@ export function createMinerRouter(deps: MinerApiDeps): Router {
   router.get(
     "/miners",
     asyncHandler(async (_req, res) => {
-      const miners = await deps.repository.listMiners();
-      res.json({ miners });
+      const payload = await loadMinersList();
+      res.json(payload);
     })
   );
 

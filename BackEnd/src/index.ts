@@ -68,6 +68,9 @@ const rawSchedulerPollMs = Number(process.env.STRATEGY_SCHEDULER_POLL_MS ?? 15_0
 const schedulerPollMs = Number.isFinite(rawSchedulerPollMs) && rawSchedulerPollMs >= 5_000 ? rawSchedulerPollMs : 15_000;
 const rawMinerPollMs = Number(process.env.MINER_POLL_MS ?? 15_000);
 const minerPollMs = Number.isFinite(rawMinerPollMs) && rawMinerPollMs >= 5_000 ? rawMinerPollMs : 15_000;
+const rawMinerPollConcurrency = Number(process.env.MINER_POLL_CONCURRENCY ?? 3);
+const minerPollConcurrency =
+  Number.isFinite(rawMinerPollConcurrency) && rawMinerPollConcurrency >= 1 ? Math.floor(rawMinerPollConcurrency) : 3;
 
 const strategyRepository = new StrategyRepository(process.env.STRATEGY_STORE_PATH);
 const strategyRunner = new StrategyRunner(strategyRepository);
@@ -89,7 +92,12 @@ const minerAuthService = new MinerAuthService(minerHttpClient, minerCryptoServic
 const minerReadService = new MinerReadService(minerRepository, minerHttpClient, minerCgminerClient, minerAuthService);
 const minerVerifyService = new MinerVerifyService(minerHttpClient, minerCgminerClient);
 const minerCommandService = new MinerCommandService(minerRepository, minerHttpClient, minerAuthService, minerReadService);
-const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
+const minerPollingService = new MinerPollingService(
+  minerRepository,
+  minerReadService,
+  minerPollMs,
+  minerPollConcurrency
+);
 const btcNewsInsightsService = new BtcNewsInsightsService();
 const exchangeMarketService = new ExchangeMarketService();
 const performanceTracker = new PerformanceTracker(exchangeMarketService);

@@ -27,10 +27,10 @@ export function AsicMinersPage() {
   const [draftVerification, setDraftVerification] = useState<MinerVerificationResult | null>(null);
   const [historyScope, setHistoryScope] = useState<FleetHistoryScope>("hour");
 
-  const { data: overviewData, isPending: loadingOverview } = useFleetOverview();
-  const { data: historyData, isPending: loadingHistory } = useFleetHistory(historyScope);
+  const { data: overviewData, isPending: loadingOverview, error: overviewError } = useFleetOverview();
+  const { data: historyData, isPending: loadingHistory, error: historyError } = useFleetHistory(historyScope);
   const { data: fleetData, isPending: loadingFleet, error: fleetError } = useFleetLive();
-  const { data: minersData, isPending: loadingMiners } = useMiners();
+  const { data: minersData, isPending: loadingMiners, error: minersError } = useMiners();
   const { data: selectedMinerDetails } = useMinerDetails(selectedMinerId);
   const { data: selectedMinerHistory } = useMinerHistory(selectedMinerId, 120);
 
@@ -173,11 +173,18 @@ export function AsicMinersPage() {
     },
   });
 
-  const isLoading = loadingOverview || loadingFleet || loadingMiners;
   const miners = minersData?.miners ?? EMPTY_MINERS;
   const fleetLive = fleetData?.miners ?? EMPTY_FLEET_LIVE;
+  const overview = overviewData?.overview;
+  const isOverviewLoading = loadingOverview && !overview;
+  const isTableLoading = loadingMiners && miners.length === 0;
+  const hasFleetTelemetry = fleetLive.length > 0;
+  const isFleetRefreshing = loadingFleet && !hasFleetTelemetry;
   const allSelected = miners.length > 0 && selectedMinerIds.length === miners.length;
   const someSelected = selectedMinerIds.length > 0 && !allSelected;
+  const errorMessages = [fleetError, overviewError, minersError, historyError]
+    .map((error) => (error instanceof Error ? error.message : null))
+    .filter((message, index, messages): message is string => Boolean(message) && messages.indexOf(message) === index);
 
   useEffect(() => {
     const validMinerIds = new Set(miners.map((miner) => miner.id));
@@ -243,13 +250,13 @@ export function AsicMinersPage() {
         </div>
       </div>
 
-      <FleetOverviewCards overview={overviewData?.overview} isLoading={loadingOverview && !overviewData?.overview} />
+      <FleetOverviewCards overview={overview} isLoading={isOverviewLoading} />
 
-      {fleetError ? (
+      {errorMessages.length > 0 ? (
         <div className="rounded-lg border border-negative/40 bg-negative/10 p-4 text-sm text-negative animate-fade-up">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-4 w-4" />
-            <div>{fleetError instanceof Error ? fleetError.message : "Fleet data could not be loaded."}</div>
+            <div>{errorMessages.join(" ")}</div>
           </div>
         </div>
       ) : null}
@@ -265,11 +272,11 @@ export function AsicMinersPage() {
         <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Fleet Dashboard</div>
-            {isLoading ? (
+            {isTableLoading ? (
               <Skeleton className="mt-2 h-5 w-32" />
             ) : (
               <div className="mt-1 text-sm font-mono text-foreground">
-              {miners.length} miners | {fleetLive.filter((miner) => miner.online).length} online
+                {miners.length} miners | {hasFleetTelemetry ? `${fleetLive.filter((miner) => miner.online).length} online` : "Live status pending"}
               </div>
             )}
           </div>
@@ -280,14 +287,14 @@ export function AsicMinersPage() {
               onAction={handleBulkAction}
               onClear={() => setSelectedMinerIds([])}
             />
-            {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+            {isFleetRefreshing ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
           </div>
         </div>
 
         <MinerTable
           miners={miners}
           fleetLive={fleetLive}
-          isLoading={isLoading}
+          isLoading={isTableLoading}
           selectedMinerIds={selectedMinerIds}
           allSelected={allSelected}
           someSelected={someSelected}
