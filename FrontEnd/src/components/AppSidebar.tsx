@@ -18,6 +18,7 @@ import {
   BrainCircuit,
   ActivitySquare,
   ArrowLeftRight,
+  PlaySquare,
 } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -30,6 +31,7 @@ const navItems = [
   { id: "portfolio", label: "Portfolio", icon: Briefcase },
   { id: "trading", label: "Trading", icon: ClipboardList },
   { id: "exchange-intelligence", label: "Exchange Intel", icon: ArrowLeftRight },
+  { id: "execution-simulator", label: "Execution Sim", icon: PlaySquare },
   { id: "rebalance", label: "Rebalance", icon: RefreshCw },
   { id: "automation", label: "Strategies", icon: Bot },
   { id: "decision-intelligence", label: "Decision Intel", icon: BrainCircuit },

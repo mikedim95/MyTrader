@@ -678,6 +678,129 @@ export interface ExchangeCompareResponse {
   generatedAt: string;
 }
 
+export type ExecutionSimulatorSymbol = "BTC-USD";
+export type PaperTradeSignalAction = "buy" | "sell";
+
+export interface PaperTradeSignal {
+  id: string;
+  symbol: ExecutionSimulatorSymbol;
+  action: PaperTradeSignalAction;
+  confidence: number;
+  reason: string;
+  timestamp: string;
+}
+
+export interface ExecutionGuardrailResult {
+  allowed: boolean;
+  reason?: string;
+  reasons: string[];
+  triggered: string[];
+}
+
+export interface ExecutionSimulationChunk {
+  index: number;
+  size: number;
+  limitPrice: number;
+  fillPrice: number;
+  outcome: "limit_fill" | "market_fallback";
+  waitTimeMs: number;
+}
+
+export interface PaperExecutionPortfolioPosition {
+  symbol: string;
+  size: number;
+  avgEntry: number;
+  marketPrice: number;
+  marketValue: number;
+  allocationPercent: number;
+}
+
+export interface PaperExecutionPortfolio {
+  balanceUSD: number;
+  startingBalanceUSD: number;
+  totalEquityUSD: number;
+  positions: PaperExecutionPortfolioPosition[];
+  updatedAt: string;
+}
+
+export interface ExecutionSimulationResponse {
+  allowed: boolean;
+  blockReason?: string;
+  execution: {
+    id: string;
+    signalId: string;
+    symbol: string;
+    action: PaperTradeSignalAction;
+    status: "filled" | "blocked";
+    confidence: number;
+    reason: string;
+    size: number;
+    notionalUsd: number;
+    avgFillPrice: number | null;
+    referencePrice: number;
+    slippage: number | null;
+    method: "limit+fallback" | null;
+    executionTimeMs: number | null;
+    explanation: string;
+    bestBid: number;
+    bestAsk: number;
+    spreadPercent: number;
+    chunks: ExecutionSimulationChunk[];
+  };
+  guardrails: ExecutionGuardrailResult;
+  portfolio: PaperExecutionPortfolio;
+  generatedAt: string;
+}
+
+export interface ExecutionHistoryItem {
+  id: string;
+  signalId: string;
+  signalType: string;
+  symbol: string;
+  action: PaperTradeSignalAction;
+  confidence: number;
+  reason: string;
+  status: "filled" | "blocked";
+  size: number;
+  notionalUsd: number;
+  avgPrice: number | null;
+  referencePrice: number | null;
+  slippage: number | null;
+  method: string | null;
+  blockReason: string | null;
+  realizedPnl: number;
+  pnl: number | null;
+  returnPercent: number | null;
+  latestOutcomeHorizon: "1h" | "24h" | null;
+  createdAt: string;
+}
+
+export interface ExecutionHistoryResponse {
+  executions: ExecutionHistoryItem[];
+  portfolio: PaperExecutionPortfolio;
+  generatedAt: string;
+}
+
+export interface ExecutionPerformanceSummary {
+  winRate: number;
+  avgReturn: number;
+  totalTrades: number;
+  evaluatedTrades: number;
+  realizedPnl: number;
+}
+
+export interface ExecutionPerformanceBreakdown extends ExecutionPerformanceSummary {
+  key: string;
+  label: string;
+}
+
+export interface ExecutionPerformanceResponse {
+  summary: ExecutionPerformanceSummary;
+  breakdown: ExecutionPerformanceBreakdown[];
+  portfolio: PaperExecutionPortfolio;
+  generatedAt: string;
+}
+
 export type StrategyMode = "manual" | "hybrid" | "automatic";
 export type StrategyCompositionMode = "manual" | "automatic";
 export type MarketRegime = "risk_on" | "neutral" | "risk_off" | "high_volatility";

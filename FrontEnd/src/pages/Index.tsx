@@ -7,6 +7,7 @@ import { ComingSoonPage } from "@/components/ComingSoonPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
 import { TradingPage } from "@/pages/TradingPage";
 import { ExchangeIntelligencePage } from "@/pages/ExchangeIntelligencePage";
+import { ExecutionSimulatorPage } from "@/pages/ExecutionSimulatorPage";
 import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { BtcNewsInsightsPage } from "@/pages/BtcNewsInsightsPage";
@@ -50,6 +51,8 @@ const Index = ({ session, onLogout }: IndexProps) => {
         return <TradingPage accountType={accountType} />;
       case "exchange-intelligence":
         return <ExchangeIntelligencePage />;
+      case "execution-simulator":
+        return <ExecutionSimulatorPage />;
       case "rebalance":
         return <RebalancePage accountType={accountType} />;
       case "automation":

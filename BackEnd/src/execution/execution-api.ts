@@ -4,6 +4,9 @@ import { z } from "zod";
 import { resolveStrategyUserScope } from "../strategy/strategy-user-scope.js";
 import { ExecutionGuardrailService } from "./execution-guardrail-service.js";
 import { SignalOutcomeService } from "./signal-review-service.js";
+import { ExecutionEngine } from "../services/execution/executionEngine.js";
+import { PerformanceTracker } from "../services/learning/performanceTracker.js";
+import { tradeSignalSchema } from "../services/signals/signalProcessor.js";
 
 const accountTypeSchema = z.enum(["real", "demo"]);
 const actionSchema = z.enum(["buy", "sell", "hold"]);
@@ -50,6 +53,8 @@ const guardrailRequestSchema = z.object({
 interface ExecutionApiDeps {
   executionGuardrailService: ExecutionGuardrailService;
   signalOutcomeService: SignalOutcomeService;
+  executionEngine: ExecutionEngine;
+  performanceTracker: PerformanceTracker;
 }
 
 function requireUserScope(req: Request, res: Response) {
@@ -112,6 +117,57 @@ export function createExecutionRouter(deps: ExecutionApiDeps): Router {
       const accountType = parseAccountType(req.query.accountType);
       const limit = parseLimit(req.query.limit, 25);
       const result = await deps.signalOutcomeService.getSignalReview(accountType, limit, userScope);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/execution/simulate", async (req, res, next) => {
+    try {
+      const userScope = requireUserScope(req, res);
+      if (!userScope) {
+        return;
+      }
+
+      const parsedBody = tradeSignalSchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        res.status(400).json({
+          message: parsedBody.error.issues[0]?.message ?? "Invalid trade signal payload.",
+        });
+        return;
+      }
+
+      const result = await deps.executionEngine.simulate(parsedBody.data, userScope);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/execution/history", async (req, res, next) => {
+    try {
+      const userScope = requireUserScope(req, res);
+      if (!userScope) {
+        return;
+      }
+
+      const limit = parseLimit(req.query.limit, 25);
+      const result = await deps.performanceTracker.getExecutionHistory(userScope, limit);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/execution/performance", async (req, res, next) => {
+    try {
+      const userScope = requireUserScope(req, res);
+      if (!userScope) {
+        return;
+      }
+
+      const result = await deps.performanceTracker.getExecutionPerformance(userScope);
       res.json(result);
     } catch (error) {
       next(error);

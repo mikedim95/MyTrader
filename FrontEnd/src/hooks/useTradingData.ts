@@ -80,6 +80,26 @@ export function useSignalReview(accountType: PortfolioAccountType = "real", limi
   });
 }
 
+export function useExecutionHistory(limit = 25) {
+  return useQuery({
+    queryKey: ["execution-history", limit],
+    queryFn: () => backendApi.getExecutionHistory(limit),
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useExecutionPerformance() {
+  return useQuery({
+    queryKey: ["execution-performance"],
+    queryFn: backendApi.getExecutionPerformance,
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
 export function useNicehashConnection(enabled = true) {
   return useQuery({
     queryKey: ["nicehash-connection"],

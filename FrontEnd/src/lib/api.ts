@@ -11,6 +11,9 @@ import type {
   DecisionIntelligenceResponse,
   ExecutionGuardrailEvaluationRequest,
   ExecutionGuardrailEvaluationResponse,
+  ExecutionHistoryResponse,
+  ExecutionPerformanceResponse,
+  ExecutionSimulationResponse,
   ExchangeCompareResponse,
   ExchangeHealthResponse,
   ExchangeMarketSymbol,
@@ -40,6 +43,7 @@ import type {
   NicehashOverviewResponse,
   NicehashConnectionStatus,
   OrdersResponse,
+  PaperTradeSignal,
   PortfolioAccountType,
   RebalanceAllocationInput,
   RebalanceAllocationProfileResponse,
@@ -212,6 +216,15 @@ export const backendApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  simulateExecution: (body: PaperTradeSignal) =>
+    apiRequest<ExecutionSimulationResponse>("/api/execution/simulate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getExecutionHistory: (limit = 25) =>
+    apiRequest<ExecutionHistoryResponse>(withQuery("/api/execution/history", { limit: String(limit) })),
+  getExecutionPerformance: () =>
+    apiRequest<ExecutionPerformanceResponse>("/api/execution/performance"),
   getSignalReview: (accountType: PortfolioAccountType = "real", limit = 25) =>
     apiRequest<SignalReviewResponse>(withQuery("/api/signals/review", { accountType, limit: String(limit) })),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),

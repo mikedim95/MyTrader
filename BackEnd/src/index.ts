@@ -27,6 +27,10 @@ import { createNewsRouter } from "./news/news-api.js";
 import { BtcNewsInsightsService } from "./news/news-service.js";
 import { createExchangeMarketRouter } from "./services/exchanges/exchangeMarketApi.js";
 import { ExchangeMarketService } from "./services/exchanges/exchangeMarketService.js";
+import { ExecutionEngine } from "./services/execution/executionEngine.js";
+import { OrderSimulator } from "./services/execution/orderSimulator.js";
+import { PerformanceTracker } from "./services/learning/performanceTracker.js";
+import { SignalProcessor } from "./services/signals/signalProcessor.js";
 import {
   generateRecentDayLabels,
   getDailyCloseSeries,
@@ -88,6 +92,10 @@ const minerCommandService = new MinerCommandService(minerRepository, minerHttpCl
 const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
 const btcNewsInsightsService = new BtcNewsInsightsService();
 const exchangeMarketService = new ExchangeMarketService();
+const performanceTracker = new PerformanceTracker(exchangeMarketService);
+const signalProcessor = new SignalProcessor();
+const orderSimulator = new OrderSimulator();
+const executionEngine = new ExecutionEngine(exchangeMarketService, signalProcessor, orderSimulator, performanceTracker);
 const decisionIntelligenceService = new DecisionIntelligenceService(strategyRepository, btcNewsInsightsService);
 const signalOutcomeService = new SignalOutcomeService(historicalCandleProvider);
 const tradingService = new TradingService(strategyRepository);
@@ -447,6 +455,8 @@ app.use(
   createExecutionRouter({
     executionGuardrailService,
     signalOutcomeService,
+    executionEngine,
+    performanceTracker,
   })
 );
 
@@ -481,6 +491,7 @@ let server: ReturnType<typeof app.listen> | null = null;
 
 const shutdown = (): void => {
   strategyScheduler.stop();
+  performanceTracker.stop();
   minerPollingService.stop();
   if (!server) {
     process.exit(0);
@@ -494,6 +505,7 @@ const shutdown = (): void => {
 
 async function bootstrap(): Promise<void> {
   await strategyRepository.init();
+  await performanceTracker.init();
   await signalOutcomeService.init();
   await minerRepository.init();
 
@@ -506,6 +518,7 @@ async function bootstrap(): Promise<void> {
     console.error("[strategy-scheduler] Failed to start:", error);
   });
 
+  performanceTracker.start();
   minerPollingService.start();
 }
 
