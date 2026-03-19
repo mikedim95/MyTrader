@@ -202,7 +202,7 @@ export class TradingService {
         this.repository.getDemoAccountSettings(userScope),
         this.repository.listRebalanceAllocationProfiles(userScope),
       ]);
-      const portfolio = await getPortfolioState("demo", "USDC", { demoAccount, userScope });
+      const portfolio = await getPortfolioState("demo", "USDC", { demoAccount, userScope, botProfiles: profiles });
       const reservedBySymbol = collectReservedHoldings(profiles);
       const assetSymbols = new Set<string>([
         ...portfolio.assets.map((asset) => normalizeSymbol(asset.symbol)),

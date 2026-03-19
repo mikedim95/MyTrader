@@ -356,8 +356,14 @@ export class DecisionIntelligenceService {
     accountType: PortfolioAccountType = "real",
     userScope?: StrategyUserScope
   ): Promise<DecisionIntelligenceResponse> {
-    const demoAccount = accountType === "demo" ? await this.repository.getDemoAccountSettings(userScope) : undefined;
-    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount, userScope });
+    const [demoAccount, botProfiles] =
+      accountType === "demo"
+        ? await Promise.all([
+            this.repository.getDemoAccountSettings(userScope),
+            this.repository.listRebalanceAllocationProfiles(userScope),
+          ])
+        : [undefined, undefined];
+    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount, userScope, botProfiles });
     const signals = buildMarketSignalsFromPortfolio(portfolio);
     const marketContext = await buildLiveStrategyMarketContext(portfolio.timestamp, detectMarketRegime(signals));
     const news = await this.btcNewsInsightsService.getInsights();

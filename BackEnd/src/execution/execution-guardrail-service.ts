@@ -145,8 +145,14 @@ export class ExecutionGuardrailService {
     const action = normalizeAction(request.proposedAction);
     const asset = normalizeAsset(request.asset);
     const requestedSize = Math.max(0, round(Number(request.requestedSize) || 0, 4));
-    const demoAccount = accountType === "demo" ? await this.repository.getDemoAccountSettings(userScope) : undefined;
-    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount, userScope });
+    const [demoAccount, botProfiles] =
+      accountType === "demo"
+        ? await Promise.all([
+            this.repository.getDemoAccountSettings(userScope),
+            this.repository.listRebalanceAllocationProfiles(userScope),
+          ])
+        : [undefined, undefined];
+    const portfolio = await getPortfolioState(accountType, "USDC", { demoAccount, userScope, botProfiles });
     const signals = buildMarketSignalsFromPortfolio(portfolio);
     const decision = mergeDecisionContext(
       await this.decisionIntelligenceService.getDecisionIntelligence(accountType, userScope),

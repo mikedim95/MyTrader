@@ -8,6 +8,7 @@ import {
   DemoAccountSettings,
   PortfolioAccountType,
   PortfolioState,
+  RebalanceAllocationProfile,
 } from "./types.js";
 
 const DEFAULT_DEMO_CAPITAL = 10_000;
@@ -95,6 +96,58 @@ function allocationMapFromInput(
   }
 
   return normalizeAllocation(rawMap);
+}
+
+export function getEffectiveDemoHoldings(
+  baseCurrency = "USDC",
+  options?: { demoAccount?: DemoAccountSettings; botProfiles?: RebalanceAllocationProfile[] }
+): DemoAccountHolding[] {
+  const normalizedBase = normalizeSymbol(baseCurrency || "USDC");
+  const totalCapital = getResolvedDemoCapital(undefined, options?.demoAccount);
+  const coreHoldings = normalizeHoldings(options?.demoAccount?.holdings);
+  const enabledProfiles = (options?.botProfiles ?? []).filter((profile) => profile.isEnabled);
+
+  if (enabledProfiles.length === 0) {
+    return coreHoldings;
+  }
+
+  const bySymbol = new Map<string, { quantity: number; targetAllocation: number }>();
+  coreHoldings.forEach((holding) => {
+    bySymbol.set(holding.symbol, {
+      quantity: holding.quantity,
+      targetAllocation: holding.targetAllocation,
+    });
+  });
+
+  enabledProfiles.forEach((profile) => {
+    const fundingSymbol = normalizeSymbol(profile.baseCurrency || normalizedBase);
+    const reservedTargetAllocation = totalCapital > 0 ? (profile.allocatedCapital / totalCapital) * 100 : 0;
+    const currentFunding = bySymbol.get(fundingSymbol) ?? { quantity: 0, targetAllocation: 0 };
+
+    bySymbol.set(fundingSymbol, {
+      quantity: Math.max(0, currentFunding.quantity - profile.allocatedCapital),
+      targetAllocation: Math.max(0, currentFunding.targetAllocation - reservedTargetAllocation),
+    });
+
+    normalizeHoldings(profile.holdings).forEach((holding) => {
+      const current = bySymbol.get(holding.symbol) ?? { quantity: 0, targetAllocation: 0 };
+      const contributionTargetAllocation =
+        totalCapital > 0 ? (holding.targetAllocation * profile.allocatedCapital) / totalCapital : 0;
+
+      bySymbol.set(holding.symbol, {
+        quantity: current.quantity + holding.quantity,
+        targetAllocation: current.targetAllocation + contributionTargetAllocation,
+      });
+    });
+  });
+
+  return Array.from(bySymbol.entries())
+    .map(([symbol, holding]) => ({
+      symbol,
+      quantity: round(Math.max(0, holding.quantity), 10),
+      targetAllocation: round(Math.max(0, holding.targetAllocation), 4),
+    }))
+    .filter((holding) => holding.quantity > 0 || holding.targetAllocation > 0);
 }
 
 export async function createDemoAccountHoldings(
@@ -206,11 +259,10 @@ export async function getLivePortfolioState(baseCurrency = "USDC", userScope?: S
 
 export async function getDemoPortfolioState(
   baseCurrency = "USDC",
-  options?: { demoCapital?: number; demoAccount?: DemoAccountSettings }
+  options?: { demoCapital?: number; demoAccount?: DemoAccountSettings; botProfiles?: RebalanceAllocationProfile[] }
 ): Promise<PortfolioState> {
   const normalizedBase = normalizeSymbol(baseCurrency || "USDC");
-  const savedHoldings = normalizeHoldings(options?.demoAccount?.holdings);
-  const holdings = savedHoldings.length > 0 ? savedHoldings : [];
+  const holdings = getEffectiveDemoHoldings(normalizedBase, options);
   const symbols = Array.from(new Set(holdings.map((holding) => holding.symbol)));
 
   const tickerEntries = await Promise.all(
@@ -277,7 +329,12 @@ export async function getDemoPortfolioState(
 export async function getPortfolioState(
   accountType: PortfolioAccountType,
   baseCurrency = "USDC",
-  options?: { demoCapital?: number; demoAccount?: DemoAccountSettings; userScope?: StrategyUserScope }
+  options?: {
+    demoCapital?: number;
+    demoAccount?: DemoAccountSettings;
+    userScope?: StrategyUserScope;
+    botProfiles?: RebalanceAllocationProfile[];
+  }
 ): Promise<PortfolioState> {
   if (accountType === "demo") {
     return getDemoPortfolioState(baseCurrency, options);

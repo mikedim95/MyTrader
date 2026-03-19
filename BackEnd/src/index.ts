@@ -48,7 +48,7 @@ import {
   PersistedHistoricalCandleProvider,
   PersistedHistoricalMarketDataSource,
 } from "./strategy/historical-market-data.js";
-import { getDemoPortfolioState } from "./strategy/portfolio-state-service.js";
+import { getDemoPortfolioState, getEffectiveDemoHoldings } from "./strategy/portfolio-state-service.js";
 import { StrategyJobService } from "./strategy/strategy-job-service.js";
 import { StrategyRepository } from "./strategy/strategy-repository.js";
 import { StrategyRunner } from "./strategy/strategy-runner.js";
@@ -145,12 +145,16 @@ async function resolveDemoAccountSettings(userScope?: StrategyUserScope) {
 }
 
 async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<DashboardResponse> {
-  const demoAccount = await resolveDemoAccountSettings(userScope);
-  const portfolio = await getDemoPortfolioState("USDC", { demoAccount });
+  const [demoAccount, botProfiles] = await Promise.all([
+    resolveDemoAccountSettings(userScope),
+    strategyRepository.listRebalanceAllocationProfiles(userScope),
+  ]);
+  const effectiveHoldings = getEffectiveDemoHoldings("USDC", { demoAccount, botProfiles });
+  const portfolio = await getDemoPortfolioState("USDC", { demoAccount, botProfiles });
   const generatedAt = portfolio.timestamp;
-  const demoInitialized = demoAccount.holdings.length > 0;
-  const targetAllocationBySymbol = new Map(
-    demoAccount.holdings.map((holding) => [holding.symbol.toUpperCase(), holding.targetAllocation])
+  const demoInitialized = effectiveHoldings.length > 0;
+  const targetAllocationBySymbol = new Map<string, number>(
+    effectiveHoldings.map((holding) => [holding.symbol.toUpperCase(), holding.targetAllocation])
   );
 
   const assetSeries = await Promise.all(
@@ -182,7 +186,7 @@ async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<Dash
     balance: round(asset.quantity, 10),
     value: round(asset.value, 2),
     allocation: round(asset.allocation, 2),
-    targetAllocation: round(targetAllocationBySymbol.get(asset.symbol) ?? asset.allocation, 2),
+    targetAllocation: round(Math.max(targetAllocationBySymbol.get(asset.symbol) ?? 0, asset.allocation), 2),
     sparkline: hourlyValues,
     sparklinePeriod: "24h" as const,
   }));
