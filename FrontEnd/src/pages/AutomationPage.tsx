@@ -1419,6 +1419,13 @@ export function AutomationPage({ accountType }: AutomationPageProps) {
       queryClient.invalidateQueries({ queryKey: ["backtests"] }),
     ];
 
+    if (accountType === "demo") {
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["bot-profiles"] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["bot-state"] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["dashboard", "demo"] }));
+      tasks.push(queryClient.invalidateQueries({ queryKey: ["demo-account-settings"] }));
+    }
+
     if (targetRunId) {
       tasks.push(queryClient.invalidateQueries({ queryKey: ["strategy-run", targetRunId] }));
     }
