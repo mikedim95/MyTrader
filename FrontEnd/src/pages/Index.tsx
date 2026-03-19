@@ -6,6 +6,7 @@ import { ProfileModal } from "@/components/ProfileModal";
 import { ComingSoonPage } from "@/components/ComingSoonPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
 import { TradingPage } from "@/pages/TradingPage";
+import { ExchangeIntelligencePage } from "@/pages/ExchangeIntelligencePage";
 import { RebalancePage } from "@/pages/RebalancePage";
 import { AutomationPage } from "@/pages/AutomationPage";
 import { BtcNewsInsightsPage } from "@/pages/BtcNewsInsightsPage";
@@ -47,6 +48,8 @@ const Index = ({ session, onLogout }: IndexProps) => {
         return <PortfolioPage accountType={accountType} />;
       case "trading":
         return <TradingPage accountType={accountType} />;
+      case "exchange-intelligence":
+        return <ExchangeIntelligencePage />;
       case "rebalance":
         return <RebalancePage accountType={accountType} />;
       case "automation":

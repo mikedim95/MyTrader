@@ -11,6 +11,12 @@ import type {
   DecisionIntelligenceResponse,
   ExecutionGuardrailEvaluationRequest,
   ExecutionGuardrailEvaluationResponse,
+  ExchangeCompareResponse,
+  ExchangeHealthResponse,
+  ExchangeMarketSymbol,
+  ExchangeOrderBookSummaryResponse,
+  ExchangePairsResponse,
+  ExchangeTickerResponse,
   DemoAccountInitializeRequest,
   DemoAccountSettingsResponse,
   CreateBacktestResponse,
@@ -216,6 +222,14 @@ export const backendApi = {
     apiRequest<SignalReviewResponse>(withQuery("/api/signals/review", { accountType, limit: String(limit) })),
   getMiningOverview: () => apiRequest<MiningOverviewResponse>("/api/mining/overview"),
   getNicehashOverview: () => apiRequest<NicehashOverviewResponse>("/api/mining/nicehash"),
+  getExchangeHealth: () => apiRequest<ExchangeHealthResponse>("/api/exchanges/health"),
+  getExchangePairs: () => apiRequest<ExchangePairsResponse>("/api/exchanges/pairs"),
+  getExchangeTicker: (symbol: ExchangeMarketSymbol) =>
+    apiRequest<ExchangeTickerResponse>(withQuery("/api/exchanges/ticker", { symbol })),
+  getExchangeOrderBookSummary: (symbol: ExchangeMarketSymbol, depth = 10) =>
+    apiRequest<ExchangeOrderBookSummaryResponse>(withQuery("/api/exchanges/orderbook-summary", { symbol, depth: String(depth) })),
+  getExchangeComparison: (symbol: ExchangeMarketSymbol) =>
+    apiRequest<ExchangeCompareResponse>(withQuery("/api/exchanges/compare", { symbol })),
   verifyMinerDraft: (body: { name: string; ip: string; password: string }) =>
     apiRequest<VerifyMinerDraftResponse>("/api/miners/verify-draft", {
       method: "POST",

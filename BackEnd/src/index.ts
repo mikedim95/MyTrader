@@ -31,6 +31,8 @@ import { ExecutionGuardrailService } from "./execution/execution-guardrail-servi
 import { SignalOutcomeService } from "./execution/signal-review-service.js";
 import { createNewsRouter } from "./news/news-api.js";
 import { BtcNewsInsightsService } from "./news/news-service.js";
+import { createExchangeMarketRouter } from "./services/exchanges/exchangeMarketApi.js";
+import { ExchangeMarketService } from "./services/exchanges/exchangeMarketService.js";
 import {
   generateRecentDayLabels,
   getDailyCloseSeries,
@@ -91,6 +93,7 @@ const minerVerifyService = new MinerVerifyService(minerHttpClient, minerCgminerC
 const minerCommandService = new MinerCommandService(minerRepository, minerHttpClient, minerAuthService, minerReadService);
 const minerPollingService = new MinerPollingService(minerRepository, minerReadService, minerPollMs);
 const btcNewsInsightsService = new BtcNewsInsightsService();
+const exchangeMarketService = new ExchangeMarketService();
 const decisionIntelligenceService = new DecisionIntelligenceService(strategyRepository, btcNewsInsightsService);
 const signalOutcomeService = new SignalOutcomeService(historicalCandleProvider);
 const tradingService = new TradingService(strategyRepository);
@@ -461,6 +464,13 @@ app.get("/api/mining/nicehash", async (req, res) => {
   const overview = await getNicehashOverviewData(userScope);
   res.json(overview);
 });
+
+app.use(
+  "/api",
+  createExchangeMarketRouter({
+    exchangeMarketService,
+  })
+);
 
 app.use(
   "/api",

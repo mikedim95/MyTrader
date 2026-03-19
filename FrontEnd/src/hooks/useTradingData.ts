@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { backendApi } from "@/lib/api";
-import type { BacktestMarketPreviewRequest, FleetHistoryScope, PortfolioAccountType } from "@/types/api";
+import type { BacktestMarketPreviewRequest, ExchangeMarketSymbol, FleetHistoryScope, PortfolioAccountType } from "@/types/api";
 
 export function useDashboardData(accountType: PortfolioAccountType = "real") {
   return useQuery({
@@ -126,6 +126,58 @@ export function useNicehashOverview() {
     queryFn: backendApi.getNicehashOverview,
     staleTime: 10_000,
     refetchInterval: 20_000,
+    retry: 1,
+  });
+}
+
+export function useExchangeHealth() {
+  return useQuery({
+    queryKey: ["exchange-health"],
+    queryFn: backendApi.getExchangeHealth,
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useExchangePairs() {
+  return useQuery({
+    queryKey: ["exchange-pairs"],
+    queryFn: backendApi.getExchangePairs,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useExchangeTicker(symbol: ExchangeMarketSymbol | undefined) {
+  return useQuery({
+    queryKey: ["exchange-ticker", symbol],
+    queryFn: () => backendApi.getExchangeTicker(symbol ?? "BTC-USD"),
+    enabled: Boolean(symbol),
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useExchangeOrderBookSummary(symbol: ExchangeMarketSymbol | undefined, depth = 10) {
+  return useQuery({
+    queryKey: ["exchange-orderbook-summary", symbol, depth],
+    queryFn: () => backendApi.getExchangeOrderBookSummary(symbol ?? "BTC-USD", depth),
+    enabled: Boolean(symbol),
+    staleTime: 4_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useExchangeComparison(symbol: ExchangeMarketSymbol | undefined) {
+  return useQuery({
+    queryKey: ["exchange-comparison", symbol],
+    queryFn: () => backendApi.getExchangeComparison(symbol ?? "BTC-USD"),
+    enabled: Boolean(symbol),
+    staleTime: 4_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 }

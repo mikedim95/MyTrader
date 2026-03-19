@@ -608,6 +608,76 @@ export interface NicehashAssetBalance {
   btcRate: number | null;
 }
 
+export type ExchangeId = "kraken" | "coinbase";
+export type ExchangeMarketSymbol = "BTC-USD" | "ETH-USD" | "BTC-EUR" | "ETH-EUR";
+
+export interface NormalizedTicker {
+  exchange: ExchangeId;
+  symbol: ExchangeMarketSymbol;
+  bid: number;
+  ask: number;
+  last: number;
+  spreadAbsolute: number;
+  spreadPercent: number;
+  timestamp: string;
+}
+
+export interface NormalizedOrderBookSummary {
+  exchange: ExchangeId;
+  symbol: ExchangeMarketSymbol;
+  bestBid: number;
+  bestAsk: number;
+  spreadAbsolute: number;
+  spreadPercent: number;
+  topBidVolume: number;
+  topAskVolume: number;
+  totalBidVolumeTopN: number;
+  totalAskVolumeTopN: number;
+  timestamp: string;
+}
+
+export interface ExchangeHealth {
+  exchange: ExchangeId;
+  status: "online" | "offline";
+  message?: string;
+  timestamp: string;
+}
+
+export interface ExchangeBestVenue {
+  exchange: ExchangeId;
+  price: number;
+}
+
+export interface ExchangeHealthResponse {
+  exchanges: ExchangeHealth[];
+  generatedAt: string;
+}
+
+export interface ExchangePairsResponse {
+  pairs: ExchangeMarketSymbol[];
+}
+
+export interface ExchangeTickerResponse {
+  symbol: ExchangeMarketSymbol;
+  exchanges: NormalizedTicker[];
+  generatedAt: string;
+}
+
+export interface ExchangeOrderBookSummaryResponse {
+  symbol: ExchangeMarketSymbol;
+  depth: number;
+  exchanges: NormalizedOrderBookSummary[];
+  generatedAt: string;
+}
+
+export interface ExchangeCompareResponse {
+  symbol: ExchangeMarketSymbol;
+  exchanges: NormalizedTicker[];
+  bestBuy: ExchangeBestVenue | null;
+  bestSell: ExchangeBestVenue | null;
+  generatedAt: string;
+}
+
 export type StrategyMode = "manual" | "hybrid" | "automatic";
 export type StrategyCompositionMode = "manual" | "automatic";
 export type MarketRegime = "risk_on" | "neutral" | "risk_off" | "high_volatility";
