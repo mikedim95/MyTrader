@@ -11,7 +11,9 @@ RUN npm run build
 
 FROM --platform=$TARGETPLATFORM node:20-alpine AS runtime
 WORKDIR /app
+ARG APP_VERSION=dev
 ENV NODE_ENV=production
+ENV APP_VERSION=$APP_VERSION
 COPY BackEnd/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist

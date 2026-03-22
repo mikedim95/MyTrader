@@ -26,7 +26,10 @@ The API runs on `http://localhost:3001` by default.
 
 ## Endpoints
 
+- `GET /health`
 - `GET /api/health`
+- `GET /ready`
+- `GET /api/ready`
 - `GET /api/dashboard`
 - `GET /api/orders`
 - `GET /api/mining/overview`

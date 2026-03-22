@@ -1,0 +1,16 @@
+{
+  "last_good_backend_tag": "",
+  "last_good_frontend_tag": "",
+  "current_backend_tag": "",
+  "current_frontend_tag": "",
+  "current_candidate_tag": "",
+  "last_deploy_status": "idle",
+  "last_deployed_at": "",
+  "last_failure_reason": "",
+  "prepared_rollback": {
+    "backend_tag": "",
+    "frontend_tag": "",
+    "prepared_at": ""
+  },
+  "updated_at": "2026-03-21T00:00:00+00:00"
+}

@@ -43,6 +43,7 @@ import {
 import { createTradingRouter } from "./trading/trading-api.js";
 import { TradingService } from "./trading/trading-service.js";
 import type { DashboardResponse } from "./types.js";
+import pool from "./db.js";
 import { BacktestEngine } from "./strategy/backtest-engine.js";
 import {
   PersistedHistoricalCandleProvider,
@@ -60,6 +61,8 @@ import type { StrategyUserScope } from "./strategy/strategy-user-scope.js";
 const app = express();
 
 const port = Number(process.env.PORT ?? 3001);
+const appVersion = (process.env.APP_VERSION ?? process.env.GIT_SHA ?? "dev").trim() || "dev";
+const appStartedAt = new Date();
 const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:8080")
   .split(",")
   .map((origin) => origin.trim())
@@ -243,6 +246,33 @@ async function getDemoDashboardData(userScope?: StrategyUserScope): Promise<Dash
   };
 }
 
+async function checkDatabaseReady(): Promise<{ db: "ok" | "fail"; error?: string }> {
+  try {
+    await pool.query("SELECT 1 AS ok");
+    return { db: "ok" };
+  } catch (error) {
+    return {
+      db: "fail",
+      error: error instanceof Error ? error.message : "Database ping failed.",
+    };
+  }
+}
+
+async function getReadinessSnapshot() {
+  const [dbStatus, storage] = await Promise.all([checkDatabaseReady(), strategyRepository.getStorageStatus()]);
+  const status = dbStatus.db === "ok" && storage.databaseAvailable ? "ok" : "fail";
+
+  return {
+    status,
+    db: dbStatus.db,
+    storageMode: storage.storageMode,
+    version: appVersion,
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - appStartedAt.getTime()) / 1000),
+    ...(dbStatus.error ? { error: dbStatus.error } : {}),
+  };
+}
+
 app.use(
   cors({
     origin: corsOrigins.length === 1 ? corsOrigins[0] : corsOrigins,
@@ -262,14 +292,35 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get("/api/health", async (_req, res) => {
-  const storage = await strategyRepository.getStorageStatus();
+app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
+    version: appVersion,
     timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor((Date.now() - appStartedAt.getTime()) / 1000),
+  });
+});
+
+app.get("/api/health", async (_req, res) => {
+  const readiness = await getReadinessSnapshot();
+  const storage = await strategyRepository.getStorageStatus();
+  res.json({
+    status: readiness.status === "ok" ? "ok" : "degraded",
+    db: readiness.db,
+    version: readiness.version,
+    timestamp: readiness.timestamp,
     storage,
   });
 });
+
+const handleReady = async (_req: Request, res: Response) => {
+  const readiness = await getReadinessSnapshot();
+  const statusCode = readiness.status === "ok" ? 200 : 503;
+  res.status(statusCode).json(readiness);
+};
+
+app.get("/ready", handleReady);
+app.get("/api/ready", handleReady);
 
 app.get("/api/session/status", async (_req, res) => {
   const storage = await strategyRepository.getStorageStatus();

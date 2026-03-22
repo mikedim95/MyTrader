@@ -1,0 +1,68 @@
+{
+  "planner": {
+    "mode": "command",
+    "command": [
+      "codex",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "exec",
+      "--cd",
+      "{repo_root}",
+      "-"
+    ],
+    "timeout_seconds": 900,
+    "fallback_to_backlog": true
+  },
+  "builder": {
+    "command": [
+      "codex",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "exec",
+      "--cd",
+      "{repo_root}",
+      "-"
+    ],
+    "timeout_seconds": 7200
+  },
+  "git": {
+    "remote": "origin",
+    "default_branch": "main"
+  },
+  "github": {
+    "repo": "",
+    "workflow_file": "docker-publish.yml",
+    "token_env": "GITHUB_TOKEN",
+    "poll_interval_seconds": 20,
+    "timeout_seconds": 1800
+  },
+  "docker_hub": {
+    "namespace": "mikedim95",
+    "backend_repo": "mytrader-backend",
+    "frontend_repo": "mytrader-frontend",
+    "poll_interval_seconds": 20,
+    "timeout_seconds": 1800
+  },
+  "deploy": {
+    "ssh_target": "pi@your-host",
+    "ssh_port": 22,
+    "remote_compose_dir": "/home/pi/mytrader",
+    "remote_compose_file": "docker-compose.yml",
+    "remote_env_file": "/home/pi/mytrader/.env",
+    "prune_images": false,
+    "initial_wait_seconds": 15,
+    "readiness_timeout_seconds": 240,
+    "poll_interval_seconds": 5,
+    "frontend_url": "http://your-host:8080",
+    "backend_url": "http://your-host:3001"
+  },
+  "verification": {
+    "session_username": "",
+    "session_password": "",
+    "run_browser_smoke": false,
+    "browser_timeout_seconds": 120
+  },
+  "control": {
+    "cycle_limit": 1,
+    "remote_push_timeout_seconds": 120,
+    "safety_mode": "prepare_rollback"
+  }
+}

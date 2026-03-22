@@ -1,0 +1,11 @@
+{
+  "status": "partial_pass",
+  "version": "",
+  "passed": [],
+  "failed": [],
+  "regressions": [],
+  "notes": [
+    "No deployed verification report has been recorded yet."
+  ],
+  "recommended_action": "continue"
+}

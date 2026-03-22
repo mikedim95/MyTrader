@@ -43,7 +43,7 @@ Images pushed to Docker Hub:
 
 ### Tags
 
-- `sha-<commit>` for every push
+- `<full-git-sha>` for every push
 - `latest` for the default branch
 
 ### Notes
@@ -57,11 +57,12 @@ Images pushed to Docker Hub:
 
 A ready-to-run Compose stack is provided at `deploy/pi/docker-compose.yml` for ARM64 deployments with:
 
-- `mikedim95/mytrader-backend:latest`
-- `mikedim95/mytrader-frontend:latest`
+- `docker.io/<DOCKERHUB_NAMESPACE>/mytrader-backend:${BACKEND_TAG}`
+- `docker.io/<DOCKERHUB_NAMESPACE>/mytrader-frontend:${FRONTEND_TAG}`
 - `mysql:8.0` (persistent volume)
 - optional `n8nio/n8n:latest` profile for workflow automation
-- `nickfedor/watchtower:latest` for automatic image update checks
+
+The compose stack is now designed for controlled deployments. Automatic background image updates are intentionally not part of the default stack.
 
 ### Quick start on Pi
 
@@ -84,7 +85,9 @@ docker compose --profile automation up -d
 Endpoints after startup:
 
 - Frontend: `http://<PI_HOST_OR_IP>:8080`
+- Frontend version: `http://<PI_HOST_OR_IP>:8080/version.json`
 - Backend health: `http://<PI_HOST_OR_IP>:3001/api/health`
+- Backend readiness: `http://<PI_HOST_OR_IP>:3001/ready`
 - n8n: `http://<PI_HOST_OR_IP>:5678` when the `automation` profile is enabled
 
 ### Pi-safe strategy defaults
@@ -100,4 +103,17 @@ The backend now persists historical candles in MySQL and runs backtests/evaluati
 - `STRATEGY_JOB_MAX_ATTEMPTS`
 
 The defaults are intentionally conservative for Raspberry Pi 3B+: one scheduler path, low request pacing, bounded retention, and small retry counts.
+
+## Controlled Autonomous Workflow
+
+`agent-control/` now contains a local orchestration layer that plans one task at a time, hands it to a local builder agent, waits for the pushed commit to produce exact SHA-tagged images, deploys those tags over SSH, polls readiness, runs verification, and prepares rollback metadata before any rollback action.
+
+Start here:
+
+```bash
+cp agent-control/config.example.json agent-control/config.json
+python agent-control/run.py --config agent-control/config.json
+```
+
+See `agent-control/README.md` for the full operator flow.
 

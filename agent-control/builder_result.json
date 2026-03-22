@@ -1,0 +1,17 @@
+{
+  "task_id": "",
+  "changed_files": [],
+  "summary": "",
+  "local_checks": {
+    "install": "not_run",
+    "lint": "not_run",
+    "tests": "not_run",
+    "typecheck": "not_run",
+    "build": "not_run"
+  },
+  "ready_for_deploy": false,
+  "known_issues": [],
+  "commit_sha": "",
+  "branch": "",
+  "pushed": false
+}

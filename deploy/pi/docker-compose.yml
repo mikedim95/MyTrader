@@ -1,10 +1,11 @@
 services:
   backend:
-    image: docker.io/mikedim95/mytrader-backend:latest
+    image: docker.io/${DOCKERHUB_NAMESPACE:-mikedim95}/mytrader-backend:${BACKEND_TAG:-latest}
     container_name: mytrader-backend
     restart: unless-stopped
     environment:
       PORT: "3001"
+      APP_VERSION: "${BACKEND_TAG:-latest}"
       CORS_ORIGIN: "http://${PI_HOST_OR_IP:-localhost}:8080,http://localhost:8080"
       MYAPP_DB_HOST: "mysql"
       MYAPP_DB_PORT: "3306"
@@ -38,19 +39,15 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
 
   frontend:
-    image: docker.io/mikedim95/mytrader-frontend:latest
+    image: docker.io/${DOCKERHUB_NAMESPACE:-mikedim95}/mytrader-frontend:${FRONTEND_TAG:-latest}
     container_name: mytrader-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "8080:80"
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
 
   mysql:
     image: mysql:8.0
@@ -80,8 +77,6 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
 
   n8n:
     image: n8nio/n8n:latest
@@ -107,16 +102,6 @@ services:
       - n8n_data:/home/node/.n8n
     ports:
       - "5678:5678"
-    labels:
-      - com.centurylinklabs.watchtower.enable=true
-
-  watchtower:
-    image: nickfedor/watchtower:latest
-    container_name: mytrader-watchtower
-    restart: unless-stopped
-    command: --interval 300 --cleanup --label-enable
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   backend_data:

@@ -1,0 +1,11 @@
+{
+  "task_id": "",
+  "title": "",
+  "reason": "",
+  "goal_gap": "",
+  "acceptance_criteria": [],
+  "affected_areas": [],
+  "risk_level": "low",
+  "needs_deploy": false,
+  "stop_if": []
+}

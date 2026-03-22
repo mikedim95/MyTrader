@@ -1,0 +1,11 @@
+{
+  "orchestrator_state": "IDLE",
+  "next_sequence": 1,
+  "last_planned_task_id": "",
+  "last_completed_task_id": "",
+  "last_completed_at": "",
+  "last_cycle_status": "idle",
+  "completed_tasks": [],
+  "last_error": "",
+  "updated_at": "2026-03-21T00:00:00+00:00"
+}

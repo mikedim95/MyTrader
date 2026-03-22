@@ -4,8 +4,11 @@ WORKDIR /app
 COPY FrontEnd/package*.json ./
 RUN npm ci
 COPY FrontEnd/ .
+ARG VITE_APP_VERSION=dev
 ARG VITE_API_BASE_URL
+ENV VITE_APP_VERSION=$VITE_APP_VERSION
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN printf '{\"version\":\"%s\"}\n' "$VITE_APP_VERSION" > public/version.json
 RUN npm run build
 
 FROM --platform=$TARGETPLATFORM nginx:1.27-alpine AS runtime

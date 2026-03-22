@@ -1,0 +1,5 @@
+agent-control/config.json
+agent-control/orchestrator.lock
+agent-control/logs/*
+!agent-control/logs/.gitkeep
+agent-control/orchestrator/__pycache__/
