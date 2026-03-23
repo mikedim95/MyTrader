@@ -608,7 +608,7 @@ export interface NicehashAssetBalance {
   btcRate: number | null;
 }
 
-export type ExchangeId = "kraken" | "coinbase";
+export type ExchangeId = "kraken" | "coinbase" | "crypto.com";
 export type ExchangeMarketSymbol = "BTC-USD" | "ETH-USD" | "BTC-EUR" | "ETH-EUR";
 
 export interface NormalizedTicker {

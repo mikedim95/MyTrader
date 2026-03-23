@@ -21,7 +21,7 @@ export function ExchangeHealthCard({ exchanges, isLoading }: ExchangeHealthCardP
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {isLoading
-        ? Array.from({ length: 2 }).map((_, index) => (
+        ? Array.from({ length: 3 }).map((_, index) => (
             <Card key={`exchange-health-skeleton-${index}`} className="animate-fade-up">
               <CardHeader className="pb-3">
                 <Skeleton className="h-4 w-28" />

@@ -1,4 +1,5 @@
 import { CoinbaseMarketAdapter } from "./coinbaseMarketAdapter.js";
+import { CryptoComMarketAdapter } from "./cryptoComMarketAdapter.js";
 import { KrakenMarketAdapter } from "./krakenMarketAdapter.js";
 import {
   EXCHANGE_ORDER,
@@ -44,7 +45,7 @@ export class ExchangeMarketService {
   private readonly adapters: ExchangeMarketAdapter[];
 
   constructor(adapters?: ExchangeMarketAdapter[]) {
-    this.adapters = adapters ?? [new KrakenMarketAdapter(), new CoinbaseMarketAdapter()];
+    this.adapters = adapters ?? [new KrakenMarketAdapter(), new CoinbaseMarketAdapter(), new CryptoComMarketAdapter()];
   }
 
   async getHealth(): Promise<ExchangeHealth[]> {
@@ -70,7 +71,7 @@ export class ExchangeMarketService {
     const tickers = sortByExchangeOrder(toSuccessfulValues(results));
 
     if (tickers.length === 0) {
-      throw new Error(`Unable to load ${symbol} ticker data from Kraken and Coinbase.`);
+      throw new Error(`Unable to load ${symbol} ticker data from the configured public exchange adapters.`);
     }
 
     return tickers;
@@ -81,7 +82,7 @@ export class ExchangeMarketService {
     const summaries = sortByExchangeOrder(toSuccessfulValues(results));
 
     if (summaries.length === 0) {
-      throw new Error(`Unable to load ${symbol} order book data from Kraken and Coinbase.`);
+      throw new Error(`Unable to load ${symbol} order book data from the configured public exchange adapters.`);
     }
 
     return summaries;

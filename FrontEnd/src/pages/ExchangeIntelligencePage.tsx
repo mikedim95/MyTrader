@@ -14,7 +14,7 @@ import {
 import type { ExchangeId, ExchangeMarketSymbol } from "@/types/api";
 
 const FALLBACK_PAIRS: ExchangeMarketSymbol[] = ["BTC-USD", "ETH-USD", "BTC-EUR", "ETH-EUR"];
-const EXCHANGES: ExchangeId[] = ["kraken", "coinbase"];
+const EXCHANGES: ExchangeId[] = ["kraken", "coinbase", "crypto.com"];
 const DEFAULT_SYMBOL: ExchangeMarketSymbol = "BTC-USD";
 const ORDER_BOOK_DEPTH = 10;
 
@@ -69,7 +69,7 @@ export function ExchangeIntelligencePage() {
       <div>
         <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">Exchange Intelligence</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Read-only venue comparison across Kraken and Coinbase with normalized pricing and liquidity snapshots.
+          Read-only venue comparison across Kraken, Coinbase, and Crypto.com with normalized pricing and liquidity snapshots.
         </p>
       </div>
 

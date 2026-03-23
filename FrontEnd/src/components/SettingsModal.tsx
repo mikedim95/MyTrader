@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNicehashConnection } from "@/hooks/useTradingData";
 import { backendApi } from "@/lib/api";
 
-const otherExchanges = ["Coinbase", "Kraken"];
+const otherExchanges = ["Coinbase", "Kraken", "Crypto.com"];
 
 interface SettingsModalProps {
   open: boolean;

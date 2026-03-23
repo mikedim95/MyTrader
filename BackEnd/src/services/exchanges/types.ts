@@ -1,6 +1,6 @@
-export type ExchangeId = "kraken" | "coinbase";
+export type ExchangeId = "kraken" | "coinbase" | "crypto.com";
 
-export const EXCHANGE_ORDER: ExchangeId[] = ["kraken", "coinbase"];
+export const EXCHANGE_ORDER: ExchangeId[] = ["kraken", "coinbase", "crypto.com"];
 
 export const SUPPORTED_MARKET_SYMBOLS = ["BTC-USD", "ETH-USD", "BTC-EUR", "ETH-EUR"] as const;
 

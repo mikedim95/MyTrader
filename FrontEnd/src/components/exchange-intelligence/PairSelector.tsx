@@ -17,7 +17,9 @@ export function PairSelector({ pairs, selectedSymbol, onChange }: PairSelectorPr
   return (
     <div className="rounded-lg border border-border bg-card p-4 animate-fade-up">
       <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Pair Selector</div>
-      <div className="mt-2 text-sm text-muted-foreground">Polling Kraken and Coinbase public REST endpoints every 5 seconds.</div>
+      <div className="mt-2 text-sm text-muted-foreground">
+        Polling Kraken, Coinbase, and Crypto.com public REST endpoints every 5 seconds.
+      </div>
       <div className="mt-4">
         <Select value={selectedSymbol} onValueChange={(value) => onChange(value as ExchangeMarketSymbol)}>
           <SelectTrigger className="font-mono">
