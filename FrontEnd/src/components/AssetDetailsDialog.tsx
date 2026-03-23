@@ -36,6 +36,18 @@ type EntryMode = "crypto" | "fiat";
 const EXCHANGES: ExchangeId[] = ["kraken", "crypto.com", "coinbase"];
 const FIATS: TradingFiatCurrency[] = ["USD", "EUR"];
 const USD_PRIORITY = ["USDC", "USDT", "USD", "BUSD", "FDUSD", "TUSD", "DAI"];
+const EMPTY_ASSET: Asset = {
+  id: "__empty__",
+  symbol: "",
+  name: "",
+  price: 0,
+  balance: 0,
+  value: 0,
+  allocation: 0,
+  targetAllocation: 0,
+  change24h: 0,
+  sparkline: [],
+};
 
 function usd(value: number) {
   return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -109,6 +121,7 @@ export function AssetDetailsDialog({
   const [fiatCurrency, setFiatCurrency] = useState<TradingFiatCurrency>("USD");
   const [entryMode, setEntryMode] = useState<EntryMode>("fiat");
   const [amountInput, setAmountInput] = useState("");
+  const activeAsset = asset ?? EMPTY_ASSET;
 
   useEffect(() => {
     if (!asset || !open) return;
@@ -124,19 +137,18 @@ export function AssetDetailsDialog({
     setAmountInput("");
   }, [tradeAction]);
 
-  if (!asset) return null;
-
-  const assetColor = accent(asset.symbol);
-  const points = asset.sparkline.length > 1 ? asset.sparkline : [asset.price, asset.price];
+  const assetColor = accent(activeAsset.symbol || "asset");
+  const points =
+    activeAsset.sparkline.length > 1 ? activeAsset.sparkline : [activeAsset.price, activeAsset.price];
   const chart = points.map((value, index) => ({ index, value }));
-  const first = points[0] ?? asset.price;
-  const last = points[points.length - 1] ?? asset.price;
+  const first = points[0] ?? activeAsset.price;
+  const last = points[points.length - 1] ?? activeAsset.price;
   const delta = last - first;
   const deltaPct = first > 0 ? (delta / first) * 100 : 0;
   const low = Math.min(...points);
   const high = Math.max(...points);
 
-  const assetBalance = tradingAssets.find((row) => row.symbol === asset.symbol) ?? null;
+  const assetBalance = tradingAssets.find((row) => row.symbol === activeAsset.symbol) ?? null;
   const paySymbol = settlementSymbol(fiatCurrency, tradingAssets);
   const payBalance = tradingAssets.find((row) => row.symbol === paySymbol) ?? null;
   const parsedAmount = Number(amountInput);
@@ -145,8 +157,8 @@ export function AssetDetailsDialog({
   const previewPayload = validAmount
     ? ({
         accountType,
-        buyingAsset: tradeAction === "buy" ? asset.symbol : paySymbol,
-        sellingAsset: tradeAction === "buy" ? paySymbol : asset.symbol,
+        buyingAsset: tradeAction === "buy" ? activeAsset.symbol : paySymbol,
+        sellingAsset: tradeAction === "buy" ? paySymbol : activeAsset.symbol,
         amountMode: amountMode(tradeAction, entryMode),
         amount: parsedAmount,
         exchange,
@@ -155,9 +167,9 @@ export function AssetDetailsDialog({
     : null;
 
   const previewQuery = useQuery({
-    queryKey: ["asset-detail-preview", accountType, asset.symbol, tradeAction, exchange, fiatCurrency, entryMode, amountInput],
+    queryKey: ["asset-detail-preview", accountType, activeAsset.symbol, tradeAction, exchange, fiatCurrency, entryMode, amountInput],
     queryFn: () => backendApi.previewTrade(previewPayload as TradingTransactionRequest),
-    enabled: open && Boolean(previewPayload),
+    enabled: open && Boolean(asset) && Boolean(previewPayload),
     staleTime: 0,
     refetchOnWindowFocus: false,
     retry: 1,
@@ -180,17 +192,19 @@ export function AssetDetailsDialog({
     },
   });
 
-  const activity = recentActivity.filter((item) => item.asset.trim().toUpperCase() === asset.symbol.toUpperCase()).slice(0, 5);
+  const activity = recentActivity
+    .filter((item) => item.asset.trim().toUpperCase() === activeAsset.symbol.toUpperCase())
+    .slice(0, 5);
   const maxInput =
     tradeAction === "buy"
       ? entryMode === "fiat"
         ? payBalance?.freeAmount ?? 0
-        : asset.price > 0
-          ? (payBalance?.freeValueUsd ?? 0) / asset.price
+        : activeAsset.price > 0
+          ? (payBalance?.freeValueUsd ?? 0) / activeAsset.price
           : 0
       : entryMode === "crypto"
-        ? assetBalance?.freeAmount ?? asset.balance
-        : assetBalance?.freeValueUsd ?? asset.value;
+        ? assetBalance?.freeAmount ?? activeAsset.balance
+        : assetBalance?.freeValueUsd ?? activeAsset.value;
 
   const quickButtons =
     entryMode === "fiat"
@@ -208,6 +222,7 @@ export function AssetDetailsDialog({
         ];
 
   const executeDisabled =
+    !asset ||
     !previewPayload ||
     !previewQuery.data ||
     !previewQuery.data.executable ||
@@ -221,22 +236,22 @@ export function AssetDetailsDialog({
         <div className="grid h-full lg:grid-cols-[minmax(0,1.35fr)_420px]">
           <div className="overflow-y-auto p-6 md:p-8">
             <DialogHeader className="space-y-3">
-              <div className="text-sm text-muted-foreground">Portfolio / {asset.name}</div>
+              <div className="text-sm text-muted-foreground">Portfolio / {activeAsset.name}</div>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-mono font-semibold text-background" style={{ backgroundColor: assetColor }}>
-                    {asset.symbol.slice(0, 2)}
+                    {activeAsset.symbol.slice(0, 2)}
                   </div>
                   <div>
-                    <DialogTitle className="font-mono text-3xl">{asset.name}</DialogTitle>
-                    <DialogDescription className="mt-1 font-mono text-lg uppercase tracking-wider">{asset.symbol}</DialogDescription>
+                    <DialogTitle className="font-mono text-3xl">{activeAsset.name}</DialogTitle>
+                    <DialogDescription className="mt-1 font-mono text-lg uppercase tracking-wider">{activeAsset.symbol}</DialogDescription>
                   </div>
                 </div>
                 <div className="text-left md:text-right">
-                  <div className="text-4xl font-mono font-semibold text-foreground">{usd(asset.price)}</div>
-                  <div className={cn("mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-mono", asset.change24h >= 0 ? "bg-positive/10 text-positive" : "bg-negative/10 text-negative")}>
-                    {asset.change24h >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                    {pct(asset.change24h)}
+                  <div className="text-4xl font-mono font-semibold text-foreground">{usd(activeAsset.price)}</div>
+                  <div className={cn("mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-mono", activeAsset.change24h >= 0 ? "bg-positive/10 text-positive" : "bg-negative/10 text-negative")}>
+                    {activeAsset.change24h >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                    {pct(activeAsset.change24h)}
                   </div>
                 </div>
               </div>
@@ -246,7 +261,7 @@ export function AssetDetailsDialog({
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Price movement</div>
-                  <div className="mt-2 text-2xl font-mono font-semibold text-foreground">{usd(last || asset.price)}</div>
+                  <div className="mt-2 text-2xl font-mono font-semibold text-foreground">{usd(last || activeAsset.price)}</div>
                   <div className={cn("mt-1 text-sm font-mono", delta >= 0 ? "text-positive" : "text-negative")}>
                     {delta >= 0 ? "+" : "-"}{usd(Math.abs(delta))} | {pct(deltaPct)}
                   </div>
@@ -260,7 +275,7 @@ export function AssetDetailsDialog({
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chart} margin={{ top: 6, right: 6, left: 6, bottom: 6 }}>
                     <defs>
-                      <linearGradient id={`asset-fill-${asset.id}`} x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id={`asset-fill-${activeAsset.id}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={assetColor} stopOpacity={0.45} />
                         <stop offset="100%" stopColor={assetColor} stopOpacity={0.03} />
                       </linearGradient>
@@ -273,7 +288,7 @@ export function AssetDetailsDialog({
                         return <div className="rounded-lg border border-border bg-card/95 px-3 py-2 text-xs font-mono text-foreground shadow-xl">{usd(value)}</div>;
                       }}
                     />
-                    <Area type="monotone" dataKey="value" stroke={assetColor} fill={`url(#asset-fill-${asset.id})`} strokeWidth={2.25} dot={false} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="value" stroke={assetColor} fill={`url(#asset-fill-${activeAsset.id})`} strokeWidth={2.25} dot={false} isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -294,8 +309,8 @@ export function AssetDetailsDialog({
 
             <div className="mt-8 space-y-8">
               <div className="rounded-3xl border border-border bg-secondary/12 p-5">
-                <div className="text-4xl font-mono font-semibold text-foreground">{usd(asset.value)}</div>
-                <div className="mt-2 text-lg font-mono text-muted-foreground">{amount(asset.balance, asset.symbol)}</div>
+                <div className="text-4xl font-mono font-semibold text-foreground">{usd(activeAsset.value)}</div>
+                <div className="mt-2 text-lg font-mono text-muted-foreground">{amount(activeAsset.balance, activeAsset.symbol)}</div>
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <Button type="button" className="h-14 rounded-full bg-primary/18 font-mono text-primary hover:bg-primary/24" variant="secondary" onClick={() => setTradeAction("buy")}>
                     <ArrowDownToLine className="h-4 w-4" />
@@ -311,9 +326,9 @@ export function AssetDetailsDialog({
               <div>
                 <div className="text-3xl font-mono font-semibold text-foreground">Performance</div>
                 <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Stat label="Position move" value={`${asset.change24h >= 0 ? "+" : "-"}${usd(Math.abs((asset.value * asset.change24h) / 100))}`} tone={asset.change24h >= 0 ? "positive" : "negative"} />
-                  <Stat label="Portfolio share" value={`${asset.allocation.toFixed(2)}%`} />
-                  <Stat label="Target weight" value={`${asset.targetAllocation.toFixed(2)}%`} subvalue={`${(asset.targetAllocation - asset.allocation).toFixed(2)} pts drift`} />
+                  <Stat label="Position move" value={`${activeAsset.change24h >= 0 ? "+" : "-"}${usd(Math.abs((activeAsset.value * activeAsset.change24h) / 100))}`} tone={activeAsset.change24h >= 0 ? "positive" : "negative"} />
+                  <Stat label="Portfolio share" value={`${activeAsset.allocation.toFixed(2)}%`} />
+                  <Stat label="Target weight" value={`${activeAsset.targetAllocation.toFixed(2)}%`} subvalue={`${(activeAsset.targetAllocation - activeAsset.allocation).toFixed(2)} pts drift`} />
                   <Stat label="24H range" value={`${usd(low)} - ${usd(high)}`} />
                 </div>
               </div>
@@ -322,10 +337,10 @@ export function AssetDetailsDialog({
                 <div className="text-3xl font-mono font-semibold text-foreground">Breakdown</div>
                 <div className="mt-5 space-y-3">
                   {[
-                    { label: "Portfolio balance", qty: amount(asset.balance, asset.symbol), val: usd(asset.value), icon: <Wallet className="h-4 w-4 text-primary" /> },
-                    { label: "Free to trade", qty: amount(assetBalance?.freeAmount ?? asset.balance, asset.symbol), val: usd(assetBalance?.freeValueUsd ?? asset.value), icon: <Coins className="h-4 w-4 text-primary" /> },
-                    { label: "Reserved in strategies", qty: amount(assetBalance?.reservedAmount ?? 0, asset.symbol), val: usd(assetBalance?.reservedValueUsd ?? 0), icon: <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" /> },
-                    { label: "Locked", qty: amount(assetBalance?.lockedAmount ?? 0, asset.symbol), val: usd((assetBalance?.lockedAmount ?? 0) * (assetBalance?.priceUsd ?? asset.price)), icon: <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" /> },
+                    { label: "Portfolio balance", qty: amount(activeAsset.balance, activeAsset.symbol), val: usd(activeAsset.value), icon: <Wallet className="h-4 w-4 text-primary" /> },
+                    { label: "Free to trade", qty: amount(assetBalance?.freeAmount ?? activeAsset.balance, activeAsset.symbol), val: usd(assetBalance?.freeValueUsd ?? activeAsset.value), icon: <Coins className="h-4 w-4 text-primary" /> },
+                    { label: "Reserved in strategies", qty: amount(assetBalance?.reservedAmount ?? 0, activeAsset.symbol), val: usd(assetBalance?.reservedValueUsd ?? 0), icon: <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" /> },
+                    { label: "Locked", qty: amount(assetBalance?.lockedAmount ?? 0, activeAsset.symbol), val: usd((assetBalance?.lockedAmount ?? 0) * (assetBalance?.priceUsd ?? activeAsset.price)), icon: <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" /> },
                   ].map((row) => (
                     <div key={row.label} className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-secondary/10 px-5 py-4">
                       <div className="flex items-center gap-3">
@@ -360,7 +375,7 @@ export function AssetDetailsDialog({
                     </div>
                   )) : (
                     <div className="rounded-2xl border border-dashed border-border bg-secondary/10 px-5 py-8 text-sm text-muted-foreground">
-                      No recent portfolio activity for {asset.symbol} was returned by the dashboard feed.
+                      No recent portfolio activity for {activeAsset.symbol} was returned by the dashboard feed.
                     </div>
                   )}
                 </div>
@@ -385,18 +400,18 @@ export function AssetDetailsDialog({
 
               <div className="space-y-3 rounded-3xl border border-border bg-card/70 p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Amount</div>
-                    <div className="mt-2 text-5xl font-mono font-semibold text-foreground">{amountInput && validAmount ? amountInput : "0"}</div>
-                    <div className="mt-2 text-sm text-muted-foreground">in {entryMode === "fiat" ? fiatCurrency : asset.symbol}</div>
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Amount</div>
+                      <div className="mt-2 text-5xl font-mono font-semibold text-foreground">{amountInput && validAmount ? amountInput : "0"}</div>
+                    <div className="mt-2 text-sm text-muted-foreground">in {entryMode === "fiat" ? fiatCurrency : activeAsset.symbol}</div>
                   </div>
-                  <div className="rounded-full border border-border bg-secondary/20 px-3 py-2 text-sm font-mono text-foreground">{asset.symbol}</div>
+                  <div className="rounded-full border border-border bg-secondary/20 px-3 py-2 text-sm font-mono text-foreground">{activeAsset.symbol}</div>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-[1fr_110px]">
                   <Input value={amountInput} onChange={(event) => setAmountInput(event.target.value)} inputMode="decimal" placeholder="0.00" className="h-14 border-border bg-background/50 text-lg font-mono" />
                   <Button type="button" variant="outline" className="h-14 border-border bg-background/40 font-mono" onClick={() => setEntryMode((current) => (current === "crypto" ? "fiat" : "crypto"))}>
-                    {entryMode === "crypto" ? fiatCurrency : asset.symbol}
+                    {entryMode === "crypto" ? fiatCurrency : activeAsset.symbol}
                   </Button>
                 </div>
 
@@ -441,9 +456,9 @@ export function AssetDetailsDialog({
                     <div className="mt-2 text-sm font-mono text-foreground">{usd(payBalance?.freeValueUsd ?? 0)}</div>
                   </div>
                   <div className="rounded-2xl border border-border bg-secondary/12 px-4 py-4">
-                    <div className="text-base font-mono font-semibold text-foreground">{asset.symbol}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">Free balance {amount(assetBalance?.freeAmount ?? asset.balance, asset.symbol)}</div>
-                    <div className="mt-2 text-sm font-mono text-foreground">{usd(assetBalance?.freeValueUsd ?? asset.value)}</div>
+                    <div className="text-base font-mono font-semibold text-foreground">{activeAsset.symbol}</div>
+                    <div className="mt-1 text-sm text-muted-foreground">Free balance {amount(assetBalance?.freeAmount ?? activeAsset.balance, activeAsset.symbol)}</div>
+                    <div className="mt-2 text-sm font-mono text-foreground">{usd(assetBalance?.freeValueUsd ?? activeAsset.value)}</div>
                   </div>
                 </div>
               </div>
@@ -477,11 +492,11 @@ export function AssetDetailsDialog({
                 disabled={executeDisabled}
                 className={cn("h-14 w-full rounded-2xl text-lg font-mono font-semibold", tradeAction === "buy" ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-secondary text-foreground hover:bg-secondary/90")}
               >
-                {executeMutation.isPending ? "Executing..." : `${tradeAction === "buy" ? "Buy" : "Sell"} ${asset.symbol}`}
+                {executeMutation.isPending ? "Executing..." : `${tradeAction === "buy" ? "Buy" : "Sell"} ${activeAsset.symbol}`}
               </Button>
 
               <div className="text-xs text-muted-foreground">
-                Portfolio diversity: {portfolioTotalValue > 0 ? ((asset.value / portfolioTotalValue) * 100).toFixed(2) : asset.allocation.toFixed(2)}%
+                Portfolio diversity: {portfolioTotalValue > 0 ? ((activeAsset.value / portfolioTotalValue) * 100).toFixed(2) : activeAsset.allocation.toFixed(2)}%
               </div>
             </div>
           </div>
