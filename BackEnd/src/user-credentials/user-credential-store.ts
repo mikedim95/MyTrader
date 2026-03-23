@@ -1,14 +1,14 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { PoolConnection, RowDataPacket } from "mysql2/promise";
 import pool from "../db.js";
-import type { NicehashCredentials } from "../types.js";
+import type { CryptoComCredentials, NicehashCredentials } from "../types.js";
 import type { StrategyUserScope } from "../strategy/strategy-user-scope.js";
 
 const KEY_LENGTH = 32;
 const IV_LENGTH = 12;
 const DEFAULT_SECRET = "local-dev-user-credentials-secret";
 
-type CredentialProvider = "nicehash";
+type CredentialProvider = "nicehash" | "crypto.com";
 
 interface UserRow extends RowDataPacket {
   id: number;
@@ -292,6 +292,18 @@ export class UserCredentialStore {
 
   deleteNicehashCredentials(scope?: StrategyUserScope): Promise<void> {
     return this.deleteCredential("nicehash", scope);
+  }
+
+  getCryptoComCredentials(scope?: StrategyUserScope): Promise<StoredCredentialLookup<CryptoComCredentials>> {
+    return this.lookupCredential<CryptoComCredentials>("crypto.com", scope);
+  }
+
+  storeCryptoComCredentials(credentials: CryptoComCredentials, scope?: StrategyUserScope): Promise<void> {
+    return this.upsertCredential("crypto.com", credentials, scope);
+  }
+
+  deleteCryptoComCredentials(scope?: StrategyUserScope): Promise<void> {
+    return this.deleteCredential("crypto.com", scope);
   }
 }
 

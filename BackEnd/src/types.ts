@@ -98,10 +98,44 @@ export interface NicehashCredentials {
   apiHost: string;
 }
 
+export interface CryptoComCredentials {
+  apiKey: string;
+  apiSecret: string;
+  apiHost: string;
+}
+
 export interface NicehashConnectionStatus {
   connected: boolean;
   source: ConnectionSource;
   message?: string;
+}
+
+export interface CryptoComConnectionStatus {
+  connected: boolean;
+  source: ConnectionSource;
+  message?: string;
+}
+
+export interface CryptoComAssetBalance {
+  currency: string;
+  quantity: number | null;
+  marketValueUsd: number | null;
+  collateralAmountUsd: number | null;
+  maxWithdrawalBalance: number | null;
+  reservedQuantity: number | null;
+}
+
+export interface CryptoComOverviewResponse {
+  source: ConnectionSource;
+  connected: boolean;
+  message?: string;
+  totalAvailableBalanceUsd: number | null;
+  totalCashBalanceUsd: number | null;
+  totalCollateralValueUsd: number | null;
+  totalInitialMarginUsd: number | null;
+  totalMaintenanceMarginUsd: number | null;
+  assets: CryptoComAssetBalance[];
+  generatedAt: string;
 }
 
 export interface MinerBasicInfo {

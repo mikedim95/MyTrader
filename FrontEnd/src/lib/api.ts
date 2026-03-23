@@ -12,6 +12,8 @@ import type {
   BotStateResponse,
   BtcNewsInsightsResponse,
   ConnectionStatus,
+  CryptoComConnectionStatus,
+  CryptoComOverviewResponse,
   DecisionIntelligenceResponse,
   ExecutionGuardrailEvaluationRequest,
   ExecutionGuardrailEvaluationResponse,
@@ -93,6 +95,12 @@ interface NicehashConnectRequest {
   apiKey: string;
   apiSecret: string;
   organizationId: string;
+  apiHost?: string;
+}
+
+interface CryptoComConnectRequest {
+  apiKey: string;
+  apiSecret: string;
   apiHost?: string;
 }
 
@@ -326,6 +334,17 @@ export const backendApi = {
     apiRequest<NicehashConnectionStatus>("/api/nicehash/connection", {
       method: "DELETE",
     }),
+  getCryptoComConnection: () => apiRequest<CryptoComConnectionStatus>("/api/crypto-com/connection"),
+  connectCryptoCom: (body: CryptoComConnectRequest) =>
+    apiRequest<CryptoComConnectionStatus>("/api/crypto-com/connection", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  disconnectCryptoCom: () =>
+    apiRequest<CryptoComConnectionStatus>("/api/crypto-com/connection", {
+      method: "DELETE",
+    }),
+  getCryptoComOverview: () => apiRequest<CryptoComOverviewResponse>("/api/crypto-com/overview"),
   getDemoAccountSettings: () =>
     apiRequest<DemoAccountSettingsResponse>("/api/strategy-settings/demo-account"),
   updateDemoAccountSettings: (balance: number) =>
@@ -494,4 +513,4 @@ export const backendApi = {
     apiRequest<BacktestMetricsResponse>(`/api/backtests/${backtestId}/metrics`),
 };
 
-export type { NicehashConnectRequest };
+export type { CryptoComConnectRequest, NicehashConnectRequest };

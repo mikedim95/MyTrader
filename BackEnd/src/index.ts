@@ -2,6 +2,13 @@ import "dotenv/config";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import {
+  clearCryptoComCredentials,
+  getCryptoComConnectionStatus,
+  getCryptoComOverview,
+  storeCryptoComCredentials,
+  validateCryptoComCredentials,
+} from "./cryptoComClient.js";
+import {
   clearNicehashCredentials,
   getNicehashConnectionStatus,
   storeNicehashCredentials,
@@ -435,6 +442,12 @@ app.get("/api/nicehash/connection", async (req, res) => {
   res.json(connection);
 });
 
+app.get("/api/crypto-com/connection", async (req, res) => {
+  const userScope = resolveStrategyUserScope(req);
+  const connection = await getCryptoComConnectionStatus(userScope);
+  res.json(connection);
+});
+
 app.post("/api/nicehash/connection", async (req, res) => {
   const userScope = requireUserScope(req, res);
   if (!userScope) return;
@@ -479,9 +492,57 @@ app.delete("/api/nicehash/connection", async (req, res) => {
   res.json(connection);
 });
 
+app.post("/api/crypto-com/connection", async (req, res) => {
+  const userScope = requireUserScope(req, res);
+  if (!userScope) return;
+
+  const apiKey = parseTextField(req.body?.apiKey);
+  const apiSecret = parseTextField(req.body?.apiSecret);
+  const apiHost = parseTextField(req.body?.apiHost) || "https://api.crypto.com";
+
+  if (!apiKey || !apiSecret) {
+    res.status(400).json({
+      message: "apiKey and apiSecret are required.",
+    });
+    return;
+  }
+
+  try {
+    const credentials = {
+      apiKey,
+      apiSecret,
+      apiHost,
+    };
+
+    await validateCryptoComCredentials(credentials);
+    const connection = await storeCryptoComCredentials(userScope, credentials);
+    res.json(connection);
+  } catch (error) {
+    res.status(400).json({
+      connected: false,
+      source: "stored",
+      message: error instanceof Error ? error.message : "Unable to validate Crypto.com credentials.",
+    });
+  }
+});
+
+app.delete("/api/crypto-com/connection", async (req, res) => {
+  const userScope = requireUserScope(req, res);
+  if (!userScope) return;
+
+  const connection = await clearCryptoComCredentials(userScope);
+  res.json(connection);
+});
+
 app.get("/api/mining/nicehash", async (req, res) => {
   const userScope = resolveStrategyUserScope(req);
   const overview = await getNicehashOverviewData(userScope);
+  res.json(overview);
+});
+
+app.get("/api/crypto-com/overview", async (req, res) => {
+  const userScope = resolveStrategyUserScope(req);
+  const overview = await getCryptoComOverview(userScope);
   res.json(overview);
 });
 

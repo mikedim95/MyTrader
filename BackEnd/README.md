@@ -34,6 +34,10 @@ The API runs on `http://localhost:3001` by default.
 - `GET /api/orders`
 - `GET /api/mining/overview`
 - `GET /api/mining/nicehash`
+- `GET /api/crypto-com/connection`
+- `POST /api/crypto-com/connection`
+- `DELETE /api/crypto-com/connection`
+- `GET /api/crypto-com/overview`
 
 ## Notes
 
@@ -47,6 +51,12 @@ You can provide mining data from your own collector by setting these variables:
 - `NICEHASH_API_SECRET`
 - `NICEHASH_ORG_ID`
 - `NICEHASH_API_HOST` (default: `https://api2.nicehash.com`)
+
+For Crypto.com Exchange wallet visibility in the frontend Exchanges pane, you can also provide:
+
+- `CRYPTO_COM_API_KEY`
+- `CRYPTO_COM_API_SECRET`
+- `CRYPTO_COM_API_HOST` (default: `https://api.crypto.com`)
 
 For live rig data in the NiceHash tab, the NiceHash API key should include `VMDS` (view mining data) in addition to wallet read access.
 

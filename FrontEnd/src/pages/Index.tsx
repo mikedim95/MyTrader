@@ -5,7 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { ProfileModal } from "@/components/ProfileModal";
 import { ComingSoonPage } from "@/components/ComingSoonPage";
 import { PortfolioPage } from "@/pages/PortfolioPage";
-import { ExchangeIntelligencePage } from "@/pages/ExchangeIntelligencePage";
+import { ExchangesHubPage, type ExchangesHubTab } from "@/pages/ExchangesHubPage";
 import { ExecutionSimulatorPage } from "@/pages/ExecutionSimulatorPage";
 import { AsicMinersPage } from "@/pages/AsicMinersPage";
 import { IntelligenceHubPage, type IntelligenceHubTab } from "@/pages/IntelligenceHubPage";
@@ -38,6 +38,7 @@ const Index = ({ session, onLogout }: IndexProps) => {
   const [accountType, setAccountType] = useState<PortfolioAccountType>("demo");
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [exchangesTab, setExchangesTab] = useState<ExchangesHubTab>("connections");
   const [strategiesTab, setStrategiesTab] = useState<StrategiesHubTab>("bots");
   const [intelligenceTab, setIntelligenceTab] = useState<IntelligenceHubTab>("decision-intelligence");
 
@@ -74,7 +75,7 @@ const Index = ({ session, onLogout }: IndexProps) => {
       case "portfolio":
         return <PortfolioPage accountType={accountType} />;
       case "exchange-intelligence":
-        return <ExchangeIntelligencePage />;
+        return <ExchangesHubPage activeTab={exchangesTab} onTabChange={setExchangesTab} />;
       case "execution-simulator":
         return <ExecutionSimulatorPage />;
       case "rebalance":

@@ -111,6 +111,17 @@ export function useNicehashConnection(enabled = true) {
   });
 }
 
+export function useCryptoComConnection(enabled = true) {
+  return useQuery({
+    queryKey: ["crypto-com-connection"],
+    queryFn: backendApi.getCryptoComConnection,
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+}
+
 export function useDemoAccountSettings() {
   return useQuery({
     queryKey: ["demo-account-settings"],
@@ -138,6 +149,17 @@ export function useNicehashOverview() {
     staleTime: 10_000,
     refetchInterval: 20_000,
     retry: 1,
+  });
+}
+
+export function useCryptoComOverview(enabled = true) {
+  return useQuery({
+    queryKey: ["crypto-com-overview"],
+    queryFn: backendApi.getCryptoComOverview,
+    enabled,
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    retry: false,
   });
 }
 

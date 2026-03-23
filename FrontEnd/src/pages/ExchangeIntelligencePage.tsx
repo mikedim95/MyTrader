@@ -18,7 +18,11 @@ const EXCHANGES: ExchangeId[] = ["kraken", "coinbase", "crypto.com"];
 const DEFAULT_SYMBOL: ExchangeMarketSymbol = "BTC-USD";
 const ORDER_BOOK_DEPTH = 10;
 
-export function ExchangeIntelligencePage() {
+interface ExchangeIntelligencePageProps {
+  embedded?: boolean;
+}
+
+export function ExchangeIntelligencePage({ embedded = false }: ExchangeIntelligencePageProps) {
   const [selectedSymbol, setSelectedSymbol] = useState<ExchangeMarketSymbol>(DEFAULT_SYMBOL);
 
   const { data: healthData, isPending: loadingHealth, error: healthError } = useExchangeHealth();
@@ -66,12 +70,14 @@ export function ExchangeIntelligencePage() {
 
   return (
     <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">Exchange Intelligence</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Read-only venue comparison across Kraken, Coinbase, and Crypto.com with normalized pricing and liquidity snapshots.
-        </p>
-      </div>
+      {embedded ? null : (
+        <div>
+          <h2 className="text-lg md:text-xl font-mono font-semibold text-foreground">Exchange Intelligence</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Read-only venue comparison across Kraken, Coinbase, and Crypto.com with normalized pricing and liquidity snapshots.
+          </p>
+        </div>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
         <div className="space-y-4">

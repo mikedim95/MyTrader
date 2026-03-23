@@ -45,6 +45,12 @@ export interface NicehashConnectionStatus {
   message?: string;
 }
 
+export interface CryptoComConnectionStatus {
+  connected: boolean;
+  source: "none" | "env" | "session" | "stored";
+  message?: string;
+}
+
 export type StrategyStorageMode = "database" | "offline";
 
 export interface DummyCredentialHint {
@@ -610,6 +616,28 @@ export interface NicehashOverviewResponse {
   accountTotalBTC: number | null;
   assets: NicehashAssetBalance[];
   miners: MinerBasicInfo[];
+  generatedAt: string;
+}
+
+export interface CryptoComAssetBalance {
+  currency: string;
+  quantity: number | null;
+  marketValueUsd: number | null;
+  collateralAmountUsd: number | null;
+  maxWithdrawalBalance: number | null;
+  reservedQuantity: number | null;
+}
+
+export interface CryptoComOverviewResponse {
+  source: "none" | "env" | "session" | "stored";
+  connected: boolean;
+  message?: string;
+  totalAvailableBalanceUsd: number | null;
+  totalCashBalanceUsd: number | null;
+  totalCollateralValueUsd: number | null;
+  totalInitialMarginUsd: number | null;
+  totalMaintenanceMarginUsd: number | null;
+  assets: CryptoComAssetBalance[];
   generatedAt: string;
 }
 
