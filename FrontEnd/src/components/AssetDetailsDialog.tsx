@@ -7,11 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useAssetMarketHistory } from "@/hooks/useTradingData";
 import { backendApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   Activity,
   Asset,
+  AssetMarketRange,
   ExchangeId,
   PortfolioAccountType,
   TradingAmountMode,
@@ -36,6 +38,7 @@ type EntryMode = "crypto" | "fiat";
 const EXCHANGES: ExchangeId[] = ["kraken", "crypto.com", "coinbase"];
 const FIATS: TradingFiatCurrency[] = ["USD", "EUR"];
 const USD_PRIORITY = ["USDC", "USDT", "USD", "BUSD", "FDUSD", "TUSD", "DAI"];
+const MARKET_RANGE_OPTIONS: AssetMarketRange[] = ["live", "24h", "7d", "30d", "90d"];
 const EMPTY_ASSET: Asset = {
   id: "__empty__",
   symbol: "",
@@ -121,6 +124,7 @@ export function AssetDetailsDialog({
   const [fiatCurrency, setFiatCurrency] = useState<TradingFiatCurrency>("USD");
   const [entryMode, setEntryMode] = useState<EntryMode>("fiat");
   const [amountInput, setAmountInput] = useState("");
+  const [marketRange, setMarketRange] = useState<AssetMarketRange>("24h");
   const activeAsset = asset ?? EMPTY_ASSET;
 
   useEffect(() => {
@@ -130,6 +134,7 @@ export function AssetDetailsDialog({
     setFiatCurrency("USD");
     setEntryMode("fiat");
     setAmountInput("");
+    setMarketRange("24h");
   }, [asset?.id, open]);
 
   useEffect(() => {
@@ -138,15 +143,24 @@ export function AssetDetailsDialog({
   }, [tradeAction]);
 
   const assetColor = accent(activeAsset.symbol || "asset");
-  const points =
+  const marketHistoryQuery = useAssetMarketHistory(asset?.symbol, marketRange);
+  const fallbackPoints =
     activeAsset.sparkline.length > 1 ? activeAsset.sparkline : [activeAsset.price, activeAsset.price];
-  const chart = points.map((value, index) => ({ index, value }));
-  const first = points[0] ?? activeAsset.price;
-  const last = points[points.length - 1] ?? activeAsset.price;
-  const delta = last - first;
-  const deltaPct = first > 0 ? (delta / first) * 100 : 0;
-  const low = Math.min(...points);
-  const high = Math.max(...points);
+  const chartPoints = marketHistoryQuery.data?.points ?? fallbackPoints.map((price, index) => ({
+    label: marketRange === "24h" ? `${index + 1}h` : `Point ${index + 1}`,
+    price,
+  }));
+  const chart = chartPoints.map((point, index) => ({ index, label: point.label, value: point.price }));
+  const currentMarketPrice = marketHistoryQuery.data?.currentPrice ?? activeAsset.price;
+  const marketChangeAmount =
+    marketHistoryQuery.data?.changeAmount ?? currentMarketPrice - (chartPoints[0]?.price ?? currentMarketPrice);
+  const marketChangePercent =
+    marketHistoryQuery.data?.changePercent ??
+    ((chartPoints[0]?.price ?? currentMarketPrice) > 0
+      ? ((currentMarketPrice - (chartPoints[0]?.price ?? currentMarketPrice)) / (chartPoints[0]?.price ?? currentMarketPrice)) * 100
+      : 0);
+  const low = marketHistoryQuery.data?.lowPrice ?? Math.min(...chartPoints.map((point) => point.price));
+  const high = marketHistoryQuery.data?.highPrice ?? Math.max(...chartPoints.map((point) => point.price));
 
   const assetBalance = tradingAssets.find((row) => row.symbol === activeAsset.symbol) ?? null;
   const paySymbol = settlementSymbol(fiatCurrency, tradingAssets);
@@ -236,7 +250,7 @@ export function AssetDetailsDialog({
         <div className="grid h-full min-h-0 lg:grid-cols-[minmax(0,1.35fr)_420px]">
           <div className="min-h-0 overflow-y-auto p-6 md:p-8">
             <DialogHeader className="space-y-3">
-              <div className="text-sm text-muted-foreground">Portfolio / {activeAsset.name}</div>
+              <div className="text-sm text-muted-foreground">Market / {activeAsset.name}</div>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="flex items-start gap-4">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-mono font-semibold text-background" style={{ backgroundColor: assetColor }}>
@@ -248,10 +262,10 @@ export function AssetDetailsDialog({
                   </div>
                 </div>
                 <div className="text-left md:text-right">
-                  <div className="text-4xl font-mono font-semibold text-foreground">{usd(activeAsset.price)}</div>
-                  <div className={cn("mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-mono", activeAsset.change24h >= 0 ? "bg-positive/10 text-positive" : "bg-negative/10 text-negative")}>
-                    {activeAsset.change24h >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-                    {pct(activeAsset.change24h)}
+                  <div className="text-4xl font-mono font-semibold text-foreground">{usd(currentMarketPrice)}</div>
+                  <div className={cn("mt-2 inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-mono", marketChangePercent >= 0 ? "bg-positive/10 text-positive" : "bg-negative/10 text-negative")}>
+                    {marketChangePercent >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                    {pct(marketChangePercent)}
                   </div>
                 </div>
               </div>
@@ -260,14 +274,14 @@ export function AssetDetailsDialog({
             <div className="mt-8 rounded-[28px] border border-border bg-[#0b1224] p-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Price movement</div>
-                  <div className="mt-2 text-2xl font-mono font-semibold text-foreground">{usd(last || activeAsset.price)}</div>
-                  <div className={cn("mt-1 text-sm font-mono", delta >= 0 ? "text-positive" : "text-negative")}>
-                    {delta >= 0 ? "+" : "-"}{usd(Math.abs(delta))} | {pct(deltaPct)}
+                  <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Market move</div>
+                  <div className="mt-2 text-2xl font-mono font-semibold text-foreground">{usd(Math.abs(marketChangeAmount))}</div>
+                  <div className={cn("mt-1 text-sm font-mono", marketChangeAmount >= 0 ? "text-positive" : "text-negative")}>
+                    {marketChangeAmount >= 0 ? "+" : "-"}{usd(Math.abs(marketChangeAmount))} | {pct(marketChangePercent)}
                   </div>
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background/40 px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                  24H trace
+                  {marketRange} trace
                 </div>
               </div>
 
@@ -284,8 +298,14 @@ export function AssetDetailsDialog({
                       cursor={{ stroke: "rgba(255,255,255,0.14)", strokeDasharray: "4 4" }}
                       content={({ active, payload }) => {
                         const value = payload?.[0]?.value;
+                        const label = payload?.[0]?.payload?.label;
                         if (!active || typeof value !== "number") return null;
-                        return <div className="rounded-lg border border-border bg-card/95 px-3 py-2 text-xs font-mono text-foreground shadow-xl">{usd(value)}</div>;
+                        return (
+                          <div className="rounded-lg border border-border bg-card/95 px-3 py-2 text-xs font-mono text-foreground shadow-xl">
+                            <div>{usd(value)}</div>
+                            {typeof label === "string" ? <div className="mt-1 text-muted-foreground">{label}</div> : null}
+                          </div>
+                        );
                       }}
                     />
                     <Area type="monotone" dataKey="value" stroke={assetColor} fill={`url(#asset-fill-${activeAsset.id})`} strokeWidth={2.25} dot={false} isAnimationActive={false} />
@@ -294,14 +314,19 @@ export function AssetDetailsDialog({
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                {["Live", "24H", "7D", "30D", "90D"].map((label, index) => (
+                {MARKET_RANGE_OPTIONS.map((rangeOption) => (
                   <button
-                    key={label}
+                    key={rangeOption}
                     type="button"
-                    disabled={index !== 1}
-                    className={cn("rounded-full border px-4 py-2 text-sm font-mono transition-colors", index === 1 ? "border-primary/35 bg-primary/12 text-primary" : "border-border bg-background/30 text-muted-foreground opacity-55")}
+                    onClick={() => setMarketRange(rangeOption)}
+                    className={cn(
+                      "rounded-full border px-4 py-2 text-sm font-mono transition-colors",
+                      marketRange === rangeOption
+                        ? "border-primary/35 bg-primary/12 text-primary"
+                        : "border-border bg-background/30 text-muted-foreground hover:border-primary/20 hover:text-foreground"
+                    )}
                   >
-                    {label}
+                    {rangeOption.toUpperCase()}
                   </button>
                 ))}
               </div>
@@ -309,6 +334,7 @@ export function AssetDetailsDialog({
 
             <div className="mt-8 space-y-8">
               <div className="rounded-3xl border border-border bg-secondary/12 p-5">
+                <div className="text-[10px] font-mono uppercase tracking-[0.24em] text-muted-foreground">Your position</div>
                 <div className="text-4xl font-mono font-semibold text-foreground">{usd(activeAsset.value)}</div>
                 <div className="mt-2 text-lg font-mono text-muted-foreground">{amount(activeAsset.balance, activeAsset.symbol)}</div>
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -326,10 +352,10 @@ export function AssetDetailsDialog({
               <div>
                 <div className="text-3xl font-mono font-semibold text-foreground">Performance</div>
                 <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Stat label="Position move" value={`${activeAsset.change24h >= 0 ? "+" : "-"}${usd(Math.abs((activeAsset.value * activeAsset.change24h) / 100))}`} tone={activeAsset.change24h >= 0 ? "positive" : "negative"} />
+                  <Stat label="Position 24H" value={`${activeAsset.change24h >= 0 ? "+" : "-"}${usd(Math.abs((activeAsset.value * activeAsset.change24h) / 100))}`} tone={activeAsset.change24h >= 0 ? "positive" : "negative"} />
                   <Stat label="Portfolio share" value={`${activeAsset.allocation.toFixed(2)}%`} />
                   <Stat label="Target weight" value={`${activeAsset.targetAllocation.toFixed(2)}%`} subvalue={`${(activeAsset.targetAllocation - activeAsset.allocation).toFixed(2)} pts drift`} />
-                  <Stat label="24H range" value={`${usd(low)} - ${usd(high)}`} />
+                  <Stat label={`${marketRange.toUpperCase()} range`} value={`${usd(low)} - ${usd(high)}`} />
                 </div>
               </div>
 

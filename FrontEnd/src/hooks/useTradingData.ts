@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { backendApi } from "@/lib/api";
-import type { BacktestMarketPreviewRequest, ExchangeMarketSymbol, FleetHistoryScope, PortfolioAccountType } from "@/types/api";
+import type {
+  AssetMarketRange,
+  BacktestMarketPreviewRequest,
+  ExchangeMarketSymbol,
+  FleetHistoryScope,
+  PortfolioAccountType,
+} from "@/types/api";
 
 export function useDashboardData(accountType: PortfolioAccountType = "real") {
   return useQuery({
@@ -36,6 +42,19 @@ export function useTradingAssets(accountType: PortfolioAccountType = "real") {
     queryFn: () => backendApi.getTradingAssets(accountType),
     staleTime: 5_000,
     refetchInterval: 15_000,
+    retry: 1,
+  });
+}
+
+export function useAssetMarketHistory(symbol: string | undefined, range: AssetMarketRange = "24h") {
+  const normalizedSymbol = symbol?.trim().toUpperCase();
+
+  return useQuery({
+    queryKey: ["asset-market-history", normalizedSymbol, range],
+    queryFn: () => backendApi.getAssetMarketHistory(normalizedSymbol ?? "", range),
+    enabled: Boolean(normalizedSymbol),
+    staleTime: 15_000,
+    refetchInterval: range === "live" ? 30_000 : 60_000,
     retry: 1,
   });
 }

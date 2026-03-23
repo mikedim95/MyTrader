@@ -1,4 +1,6 @@
 import type {
+  AssetMarketHistoryResponse,
+  AssetMarketRange,
   BacktestCreateRequest,
   BacktestMarketPreviewRequest,
   BacktestMarketPreviewResponse,
@@ -207,6 +209,10 @@ export const backendApi = {
     }),
   getDashboard: (accountType: PortfolioAccountType = "real") =>
     apiRequest<DashboardResponse>(withQuery("/api/dashboard", { accountType })),
+  getAssetMarketHistory: (symbol: string, range: AssetMarketRange = "24h") =>
+    apiRequest<AssetMarketHistoryResponse>(
+      withQuery(`/api/assets/${encodeURIComponent(symbol.trim().toUpperCase())}/market-history`, { range })
+    ),
   getTradingAssets: (accountType: PortfolioAccountType = "real") =>
     apiRequest<TradingAssetsResponse>(withQuery("/api/trading/assets", { accountType })),
   getTradingPairPreview: (base: string, quote: string, accountType: PortfolioAccountType = "real") =>

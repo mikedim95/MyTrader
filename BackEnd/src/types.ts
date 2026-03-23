@@ -64,6 +64,27 @@ export interface DashboardResponse {
   generatedAt: string;
 }
 
+export type AssetMarketRange = "live" | "24h" | "7d" | "30d" | "90d";
+
+export interface AssetMarketHistoryPoint {
+  label: string;
+  price: number;
+}
+
+export interface AssetMarketHistoryResponse {
+  symbol: string;
+  range: AssetMarketRange;
+  interval: "1h" | "1d";
+  currentPrice: number;
+  startPrice: number;
+  changeAmount: number;
+  changePercent: number;
+  highPrice: number;
+  lowPrice: number;
+  points: AssetMarketHistoryPoint[];
+  generatedAt: string;
+}
+
 export interface TradingPairPreview {
   baseSymbol: string;
   baseName: string;

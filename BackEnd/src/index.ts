@@ -42,6 +42,7 @@ import {
   generateRecentDayLabels,
   getDailyCloseSeries,
   getDashboardData,
+  getTickerSnapshot,
   getHourlyCloseSeries,
   getMarketCapForSymbol,
   getNameForSymbol,
@@ -49,7 +50,7 @@ import {
 } from "./portfolioService.js";
 import { createTradingRouter } from "./trading/trading-api.js";
 import { TradingService } from "./trading/trading-service.js";
-import type { DashboardResponse } from "./types.js";
+import type { AssetMarketHistoryResponse, AssetMarketRange, DashboardResponse } from "./types.js";
 import pool from "./db.js";
 import { BacktestEngine } from "./strategy/backtest-engine.js";
 import {
@@ -132,6 +133,48 @@ function round(value: number, digits = 2): number {
 function parseDashboardAccountType(req: Request): "real" | "demo" {
   const rawValue = typeof req.query?.accountType === "string" ? req.query.accountType.trim().toLowerCase() : "real";
   return rawValue === "demo" ? "demo" : "real";
+}
+
+const ASSET_MARKET_RANGE_CONFIG: Record<AssetMarketRange, { interval: "1h" | "1d"; points: number }> = {
+  live: { interval: "1h", points: 12 },
+  "24h": { interval: "1h", points: 24 },
+  "7d": { interval: "1d", points: 7 },
+  "30d": { interval: "1d", points: 30 },
+  "90d": { interval: "1d", points: 90 },
+};
+
+function parseAssetMarketRange(input: unknown): AssetMarketRange {
+  const normalized = typeof input === "string" ? input.trim().toLowerCase() : "";
+  if (normalized === "live" || normalized === "24h" || normalized === "7d" || normalized === "30d" || normalized === "90d") {
+    return normalized;
+  }
+  return "24h";
+}
+
+function buildRecentHourLabels(count: number): string[] {
+  const formatter = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
+  const now = new Date();
+
+  return Array.from({ length: count }, (_, index) => {
+    const hourOffset = count - 1 - index;
+    const date = new Date(now);
+    date.setHours(now.getHours() - hourOffset);
+    return formatter.format(date);
+  });
+}
+
+function normalizeHistoryPoints(labels: string[], prices: number[], currentPrice: number): AssetMarketHistoryResponse["points"] {
+  if (prices.length === 0) {
+    return [{ label: labels[0] ?? "Now", price: round(currentPrice, 6) }];
+  }
+
+  const normalizedPrices = [...prices];
+  normalizedPrices[normalizedPrices.length - 1] = round(currentPrice, 6);
+
+  return normalizedPrices.map((price, index) => ({
+    label: labels[index] ?? `Point ${index + 1}`,
+    price: round(price, 6),
+  }));
 }
 
 function parseTextField(value: unknown): string {
@@ -423,6 +466,54 @@ app.get("/api/dashboard", async (req, res) => {
 
   const dashboard = await getDashboardData(userScope);
   res.json(dashboard);
+});
+
+app.get("/api/assets/:symbol/market-history", async (req, res, next) => {
+  const symbol = parseTextField(req.params.symbol).toUpperCase();
+  if (!symbol) {
+    res.status(400).json({ message: "Asset symbol is required." });
+    return;
+  }
+
+  const range = parseAssetMarketRange(req.query?.range);
+  const config = ASSET_MARKET_RANGE_CONFIG[range];
+
+  try {
+    const ticker = await getTickerSnapshot(symbol);
+    let points: AssetMarketHistoryResponse["points"];
+
+    if (config.interval === "1h") {
+      const closes = (await getHourlyCloseSeries(symbol, null, ticker.price)).slice(-config.points);
+      points = normalizeHistoryPoints(buildRecentHourLabels(config.points), closes, ticker.price);
+    } else {
+      const dailySeries = await getDailyCloseSeries(symbol, null, ticker.price, config.points);
+      points = normalizeHistoryPoints(dailySeries.labels, dailySeries.closes, ticker.price);
+    }
+
+    const priceSeries = points.map((point) => point.price);
+    const currentPrice = round(ticker.price, 6);
+    const startPrice = round(priceSeries[0] ?? currentPrice, 6);
+    const changeAmount = round(currentPrice - startPrice, 6);
+    const changePercent = startPrice > 0 ? round((changeAmount / startPrice) * 100, 4) : 0;
+
+    const payload: AssetMarketHistoryResponse = {
+      symbol,
+      range,
+      interval: config.interval,
+      currentPrice,
+      startPrice,
+      changeAmount,
+      changePercent,
+      highPrice: round(Math.max(...priceSeries), 6),
+      lowPrice: round(Math.min(...priceSeries), 6),
+      points,
+      generatedAt: new Date().toISOString(),
+    };
+
+    res.json(payload);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/orders", async (req, res) => {

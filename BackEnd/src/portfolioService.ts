@@ -33,9 +33,10 @@ export async function getHourlyCloseSeries(
 export async function getDailyCloseSeries(
   symbol: string,
   _credentials: unknown,
-  fallbackPrice: number
+  fallbackPrice: number,
+  days = 30
 ): Promise<{ labels: string[]; closes: number[] }> {
-  return getPublicDailyCloseSeries(symbol, fallbackPrice);
+  return getPublicDailyCloseSeries(symbol, fallbackPrice, days);
 }
 
 export async function getDashboardData(_userScope?: StrategyUserScope): Promise<DashboardResponse> {
