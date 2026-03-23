@@ -233,8 +233,8 @@ export function AssetDetailsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="h-[min(94vh,980px)] max-w-[min(96vw,1500px)] gap-0 overflow-hidden border-border bg-card p-0">
-        <div className="grid h-full lg:grid-cols-[minmax(0,1.35fr)_420px]">
-          <div className="overflow-y-auto p-6 md:p-8">
+        <div className="grid h-full min-h-0 lg:grid-cols-[minmax(0,1.35fr)_420px]">
+          <div className="min-h-0 overflow-y-auto p-6 md:p-8">
             <DialogHeader className="space-y-3">
               <div className="text-sm text-muted-foreground">Portfolio / {activeAsset.name}</div>
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -383,7 +383,7 @@ export function AssetDetailsDialog({
             </div>
           </div>
 
-          <div className="overflow-y-auto border-t border-border bg-background/45 p-6 lg:border-l lg:border-t-0">
+          <div className="min-h-0 overflow-y-auto border-t border-border bg-background/45 p-6 lg:border-l lg:border-t-0">
             <div className="space-y-6">
               <div className="flex items-center gap-4">
                 {(["buy", "sell"] as const).map((mode) => (
