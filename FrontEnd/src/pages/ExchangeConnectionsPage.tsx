@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Activity, Coins, KeyRound, Landmark, Link2, ShieldCheck, Wallet, WifiOff } from "lucide-react";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Activity, ChevronDown, KeyRound, Link2, ShieldCheck, Wallet, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useCryptoComConnection, useCryptoComOverview, useExchangeHealth } from "@/hooks/useTradingData";
 import { backendApi } from "@/lib/api";
@@ -46,39 +46,6 @@ function formatTimestamp(value: string | null | undefined): string {
   return parsed.toLocaleTimeString();
 }
 
-function PublicExchangeCard({ exchange, health }: { exchange: ExchangeId; health?: ExchangeHealth }) {
-  const online = health?.status === "online";
-
-  return (
-    <Card className="animate-fade-up">
-      <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
-        <div>
-          <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Public Venue</div>
-          <div className="mt-2 text-lg font-mono font-semibold text-foreground">{formatExchangeLabel(exchange)}</div>
-        </div>
-        {online ? <Activity className="h-4 w-4 text-positive" /> : <WifiOff className="h-4 w-4 text-negative" />}
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div
-          className={cn(
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider",
-            statusBadge(online)
-          )}
-        >
-          {online ? "Public feed online" : "Public feed offline"}
-        </div>
-        <div className="text-sm text-muted-foreground">
-          Market data is available in the Market Intel tab for this venue.
-        </div>
-        <div className="text-xs text-muted-foreground">
-          Updated <span className="font-mono text-foreground">{formatTimestamp(health?.timestamp)}</span>
-        </div>
-        {health?.message ? <div className="text-xs text-muted-foreground">{health.message}</div> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
 function SummaryMetric({
   label,
   value,
@@ -97,6 +64,37 @@ function SummaryMetric({
   );
 }
 
+function ExchangePanelHeader({
+  eyebrow,
+  title,
+  description,
+  badges,
+  open,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  badges: React.ReactNode;
+  open: boolean;
+}) {
+  return (
+    <div className="flex flex-1 flex-wrap items-start justify-between gap-3 pr-4">
+      <div>
+        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">{eyebrow}</div>
+        <div className="mt-2 text-xl font-mono font-semibold text-foreground">{title}</div>
+        <div className="mt-2 text-sm text-muted-foreground">{description}</div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="flex flex-wrap justify-end gap-2">{badges}</div>
+        <ChevronDown
+          className={cn("mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ExchangeConnectionsPage() {
   const queryClient = useQueryClient();
   const { data: healthData, isPending: loadingHealth } = useExchangeHealth();
@@ -107,18 +105,33 @@ export function ExchangeConnectionsPage() {
   const [apiSecret, setApiSecret] = useState("");
   const [apiHost, setApiHost] = useState("https://api.crypto.com");
   const [cryptoComMessage, setCryptoComMessage] = useState<string | null>(null);
-  const [cryptoComSections, setCryptoComSections] = useState<string[]>([]);
+  const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
+  const [showCryptoComCredentialForm, setShowCryptoComCredentialForm] = useState(false);
 
   const healthByExchange = useMemo(
     () => new Map((healthData?.exchanges ?? []).map((entry) => [entry.exchange, entry])),
     [healthData?.exchanges]
   );
+
   const publicOnlineCount = (healthData?.exchanges ?? []).filter((exchange) => exchange.status === "online").length;
   const privateConnectedCount = cryptoComConnection?.connected ? 1 : 0;
   const cryptoComConnected = cryptoComConnection?.connected ?? false;
   const cryptoComSource = cryptoComConnection?.source?.toUpperCase() ?? "NONE";
   const cryptoComGeneratedAt = formatTimestamp(cryptoComOverview?.generatedAt);
   const topBalances = cryptoComOverview?.assets.slice(0, 8) ?? [];
+
+  const isPanelOpen = (panel: string) => expandedPanels.includes(panel);
+
+  const setPanelOpen = (panel: string, open: boolean) => {
+    setExpandedPanels((current) => {
+      if (open) {
+        return current.includes(panel) ? current : [...current, panel];
+      }
+      return current.filter((entry) => entry !== panel);
+    });
+  };
+
+  const openPanel = (panel: string) => setPanelOpen(panel, true);
 
   useEffect(() => {
     if (!cryptoComConnection?.message) return;
@@ -143,12 +156,14 @@ export function ExchangeConnectionsPage() {
     onSuccess: async (next) => {
       setApiKey("");
       setApiSecret("");
-      setCryptoComSections(next.connected ? ["details"] : ["setup"]);
+      setShowCryptoComCredentialForm(false);
+      openPanel("crypto.com");
       setCryptoComMessage(next.connected ? "Crypto.com credentials saved for this user." : next.message ?? "Connection failed.");
       await refreshCryptoComData();
     },
     onError: (error) => {
-      setCryptoComSections(["setup"]);
+      setShowCryptoComCredentialForm(true);
+      openPanel("crypto.com");
       setCryptoComMessage(getErrorMessage(error));
     },
   });
@@ -158,18 +173,21 @@ export function ExchangeConnectionsPage() {
     onSuccess: async (next) => {
       setApiKey("");
       setApiSecret("");
-      setCryptoComSections(["setup"]);
+      setShowCryptoComCredentialForm(false);
+      openPanel("crypto.com");
       setCryptoComMessage(
         next.connected ? "Stored credentials removed. Environment credentials are still active." : "Stored Crypto.com credentials removed."
       );
       await refreshCryptoComData();
     },
     onError: (error) => {
+      openPanel("crypto.com");
       setCryptoComMessage(getErrorMessage(error));
     },
   });
 
   const isCryptoComBusy = connectCryptoComMutation.isPending || disconnectCryptoComMutation.isPending;
+  const shouldShowCryptoForm = !cryptoComConnected || showCryptoComCredentialForm;
 
   return (
     <div className="space-y-6 p-4 md:p-6">
@@ -207,314 +225,313 @@ export function ExchangeConnectionsPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">
-        <Card className="animate-fade-up">
-          <CardHeader className="pb-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Private Connection</div>
-                <div className="mt-2 text-xl font-mono font-semibold text-foreground">Crypto.com</div>
-                <div className="mt-2 text-sm text-muted-foreground">
-                  Add a read-enabled Crypto.com Exchange API key to unlock wallet visibility inside this app.
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider",
-                    statusBadge(cryptoComConnection?.connected ?? false)
-                  )}
-                >
-                  {cryptoComConnection?.connected ? "Connected" : "Disconnected"}
-                </span>
-                <span className="inline-flex items-center rounded-full border border-border bg-secondary/20 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                  Source {cryptoComConnection?.source?.toUpperCase() ?? "NONE"}
-                </span>
-              </div>
-            </div>
-          </CardHeader>
-
-          <CardContent className="space-y-5">
-            <div className="rounded-xl border border-border bg-secondary/15 p-4 text-sm text-muted-foreground">
-              <div className="flex items-start gap-3">
-                <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
-                <div>
-                  Use a Crypto.com Exchange key with read permissions. If the key is IP-whitelisted, allow the backend server's public
-                  egress IP, not the local browser or Tailscale address.
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-border bg-background/40 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Connection Summary</div>
-                  <div className="mt-2 text-lg font-mono font-semibold text-foreground">
-                    {cryptoComConnected ? "Authenticated" : "Needs setup"}
-                  </div>
-                  <div className="mt-2 text-sm text-muted-foreground">
-                    {cryptoComConnected
-                      ? "Stored Crypto.com credentials are active. Expand a section below to inspect balances or rotate the key."
-                      : "Keep this pane collapsed until you need it. Expand setup to paste a read-only Exchange API key."}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  {cryptoComConnected ? (
-                    <>
-                      <Button type="button" variant="outline" onClick={() => setCryptoComSections(["wallet"])}>
-                        <Wallet className="h-4 w-4" />
-                        View balances
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => disconnectCryptoComMutation.mutate()}
-                        disabled={isCryptoComBusy}
-                      >
-                        <KeyRound className="h-4 w-4" />
-                        {disconnectCryptoComMutation.isPending ? "Disconnecting..." : "Disconnect"}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button type="button" variant="outline" onClick={() => setCryptoComSections(["setup"])}>
-                      <Link2 className="h-4 w-4" />
-                      Add API key
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-4">
-                {cryptoComConnected ? (
-                  <>
-                    <SummaryMetric label="Available" value={formatUsd(cryptoComOverview?.totalAvailableBalanceUsd)} />
-                    <SummaryMetric label="Assets" value={cryptoComOverview?.assets.length ?? 0} />
-                    <SummaryMetric label="Source" value={cryptoComSource} />
-                    <SummaryMetric label="Synced" value={cryptoComGeneratedAt} helper="Last wallet refresh" />
-                  </>
-                ) : (
-                  <>
-                    <SummaryMetric label="Status" value="Disconnected" />
-                    <SummaryMetric label="Source" value={cryptoComSource} />
-                    <SummaryMetric label="API Host" value={apiHost} helper="Default production Exchange host" />
-                    <SummaryMetric label="Access" value="Read only" helper="Only Can Read is needed" />
-                  </>
-                )}
-              </div>
-            </div>
-
-            {cryptoComMessage ? (
-              <div className="rounded-lg border border-border bg-secondary/20 px-4 py-3 text-sm text-muted-foreground">
-                {cryptoComMessage}
-              </div>
-            ) : null}
-
-            <Accordion type="multiple" value={cryptoComSections} onValueChange={setCryptoComSections} className="rounded-2xl border border-border bg-background/30 px-4">
-              <AccordionItem value="setup" className="border-border">
-                <AccordionTrigger className="py-5 text-left hover:no-underline">
-                  <div>
-                    <div className="text-sm font-mono font-semibold text-foreground">
-                      {cryptoComConnected ? "Update credentials" : "Setup API credentials"}
-                    </div>
-                    <div className="mt-1 text-sm text-muted-foreground">
-                      {cryptoComConnected
-                        ? "Rotate the stored key only when you need to replace it."
-                        : "Paste a read-enabled Exchange API key only when you are ready to connect."}
-                    </div>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="pb-5">
-                  {cryptoComConnected ? (
-                    <div className="mb-4 rounded-lg border border-border bg-secondary/15 px-4 py-3 text-sm text-muted-foreground">
-                      Saving a new API key will replace the currently stored credentials for this user.
-                    </div>
-                  ) : null}
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
-                      <Input
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        className="mt-1 border-border bg-secondary/10 font-mono"
-                        placeholder="Paste Crypto.com API key"
-                        autoComplete="off"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Host</label>
-                      <Input
-                        value={apiHost}
-                        onChange={(event) => setApiHost(event.target.value)}
-                        className="mt-1 border-border bg-secondary/10 font-mono"
-                        placeholder="https://api.crypto.com"
-                        autoComplete="off"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Secret Key</label>
-                    <Input
-                      type="password"
-                      value={apiSecret}
-                      onChange={(event) => setApiSecret(event.target.value)}
-                      className="mt-1 border-border bg-secondary/10 font-mono"
-                      placeholder="Paste Crypto.com secret key"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <Button
-                      type="button"
-                      onClick={() => connectCryptoComMutation.mutate()}
-                      disabled={isCryptoComBusy || !apiKey.trim() || !apiSecret.trim()}
-                      className="bg-primary text-primary-foreground"
-                    >
-                      <Link2 className="h-4 w-4" />
-                      {connectCryptoComMutation.isPending ? "Connecting..." : cryptoComConnected ? "Replace credentials" : "Connect Crypto.com"}
-                    </Button>
-                    {cryptoComConnected ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => disconnectCryptoComMutation.mutate()}
-                        disabled={isCryptoComBusy}
-                      >
-                        <KeyRound className="h-4 w-4" />
-                        {disconnectCryptoComMutation.isPending ? "Disconnecting..." : "Disconnect"}
-                      </Button>
-                    ) : null}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {cryptoComConnected ? (
-                <AccordionItem value="details" className="border-border">
-                  <AccordionTrigger className="py-5 text-left hover:no-underline">
-                    <div>
-                      <div className="text-sm font-mono font-semibold text-foreground">Authenticated details</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        Inspect the active connection state without exposing the stored credentials.
-                      </div>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-5">
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <SummaryMetric label="Source" value={cryptoComSource} helper="Where the active credentials came from" />
-                      <SummaryMetric label="API Host" value={apiHost} helper="Current Exchange REST target" />
-                      <SummaryMetric label="Wallet sync" value={cryptoComGeneratedAt} helper="Latest overview response timestamp" />
-                      <SummaryMetric label="Visibility" value={topBalances.length > 0 ? "Balances returned" : "No non-zero assets"} />
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ) : null}
-
-              {cryptoComConnected ? (
-                <AccordionItem value="wallet" className="border-border last:border-b-0">
-                  <AccordionTrigger className="py-5 text-left hover:no-underline">
-                    <div>
-                      <div className="text-sm font-mono font-semibold text-foreground">Wallet snapshot</div>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        Expand for cash, collateral, margin, and the top non-zero balances returned by Crypto.com.
-                      </div>
-                    </div>
-                  </AccordionTrigger>
-                  <AccordionContent className="pb-5">
-                    <div className="space-y-4 rounded-2xl border border-border bg-background/40 p-4">
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                        <SummaryMetric label="Available" value={formatUsd(cryptoComOverview?.totalAvailableBalanceUsd)} />
-                        <SummaryMetric label="Cash" value={formatUsd(cryptoComOverview?.totalCashBalanceUsd)} />
-                        <SummaryMetric label="Collateral" value={formatUsd(cryptoComOverview?.totalCollateralValueUsd)} />
-                        <SummaryMetric label="Initial Margin" value={formatUsd(cryptoComOverview?.totalInitialMarginUsd)} />
-                        <SummaryMetric label="Maintenance" value={formatUsd(cryptoComOverview?.totalMaintenanceMarginUsd)} />
-                      </div>
-
-                      <div>
-                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Top balances</div>
-                        {topBalances.length === 0 ? (
-                          <div className="mt-3 rounded-lg border border-dashed border-border bg-secondary/20 px-4 py-8 text-center text-sm text-muted-foreground">
-                            No non-zero Crypto.com balances were returned.
-                          </div>
-                        ) : (
-                          <div className="mt-3 overflow-x-auto rounded-xl border border-border">
-                            <table className="w-full min-w-[620px]">
-                              <thead>
-                                <tr className="border-b border-border">
-                                  {["Asset", "Quantity", "Reserved", "Market Value", "Max Withdraw"].map((heading) => (
-                                    <th
-                                      key={heading}
-                                      className="px-4 py-3 text-right text-[11px] font-mono uppercase tracking-wider text-muted-foreground first:text-left"
-                                    >
-                                      {heading}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {topBalances.map((asset) => (
-                                  <tr key={asset.currency} className="border-b border-border last:border-b-0">
-                                    <td className="px-4 py-3">
-                                      <div className="flex items-center gap-3">
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary/20">
-                                          <Wallet className="h-4 w-4 text-primary" />
-                                        </div>
-                                        <div className="text-sm font-mono font-semibold text-foreground">{asset.currency}</div>
-                                      </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
-                                      {formatToken(asset.quantity, asset.currency)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
-                                      {formatToken(asset.reservedQuantity, asset.currency)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
-                                      {formatUsd(asset.marketValueUsd)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-sm font-mono text-muted-foreground">
-                                      {formatToken(asset.maxWithdrawalBalance, asset.currency)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              ) : null}
-            </Accordion>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <PublicExchangeCard exchange="kraken" health={healthByExchange.get("kraken")} />
-          <PublicExchangeCard exchange="coinbase" health={healthByExchange.get("coinbase")} />
+      <div className="space-y-4">
+        <Collapsible open={isPanelOpen("crypto.com")} onOpenChange={(open) => setPanelOpen("crypto.com", open)}>
           <Card className="animate-fade-up">
-            <CardHeader className="pb-3">
-              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Venue Map</div>
-              <div className="mt-2 text-lg font-mono font-semibold text-foreground">All Exchanges</div>
+            <CardHeader className="pb-0">
+              <CollapsibleTrigger asChild>
+                <button type="button" className="flex w-full items-start py-5 text-left">
+                  <ExchangePanelHeader
+                    eyebrow="Private Connection"
+                    title="Crypto.com"
+                    description={
+                      cryptoComConnected
+                        ? "Expand for wallet details or to manage the stored Exchange API key."
+                        : "Expand to connect a read-enabled Crypto.com Exchange API key."
+                    }
+                    open={isPanelOpen("crypto.com")}
+                    badges={
+                      <>
+                        <span
+                          className={cn(
+                            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider",
+                            statusBadge(cryptoComConnected)
+                          )}
+                        >
+                          {cryptoComConnected ? "Connected" : "Disconnected"}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-border bg-secondary/20 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                          Source {cryptoComSource}
+                        </span>
+                      </>
+                    }
+                  />
+                </button>
+              </CollapsibleTrigger>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
-              <div className="flex items-start gap-3">
-                <Landmark className="mt-0.5 h-4 w-4 text-primary" />
-                <div>Crypto.com is the authenticated venue in this pane.</div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Activity className="mt-0.5 h-4 w-4 text-primary" />
-                <div>Kraken and Coinbase stay visible as live public-market venues.</div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Coins className="mt-0.5 h-4 w-4 text-primary" />
-                <div>Use the Market Intel tab to compare prices and liquidity across all of them.</div>
-              </div>
-            </CardContent>
+
+            <CollapsibleContent>
+              <CardContent className="space-y-5 pb-5">
+                <div className="rounded-xl border border-border bg-secondary/15 p-4 text-sm text-muted-foreground">
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck className="mt-0.5 h-4 w-4 text-primary" />
+                    <div>
+                      Use a Crypto.com Exchange key with read permissions. If the key is IP-whitelisted, allow the backend server's
+                      public egress IP, not the local browser or Tailscale address.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-background/40 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Connection Summary</div>
+                      <div className="mt-2 text-lg font-mono font-semibold text-foreground">
+                        {cryptoComConnected ? "Authenticated" : "Needs setup"}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        {cryptoComConnected
+                          ? "Stored Crypto.com credentials are active. Expand the wallet view below or rotate the key if needed."
+                          : "Paste a read-only Exchange API key below to connect this venue."}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      {cryptoComConnected ? (
+                        <>
+                          <Button type="button" variant="outline" onClick={() => setShowCryptoComCredentialForm((current) => !current)}>
+                            <KeyRound className="h-4 w-4" />
+                            {shouldShowCryptoForm ? "Hide key form" : "Replace key"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => disconnectCryptoComMutation.mutate()}
+                            disabled={isCryptoComBusy}
+                          >
+                            <Link2 className="h-4 w-4" />
+                            {disconnectCryptoComMutation.isPending ? "Disconnecting..." : "Disconnect"}
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    {cryptoComConnected ? (
+                      <>
+                        <SummaryMetric label="Available" value={formatUsd(cryptoComOverview?.totalAvailableBalanceUsd)} />
+                        <SummaryMetric label="Assets" value={cryptoComOverview?.assets.length ?? 0} />
+                        <SummaryMetric label="Source" value={cryptoComSource} />
+                        <SummaryMetric label="Synced" value={cryptoComGeneratedAt} helper="Last wallet refresh" />
+                      </>
+                    ) : (
+                      <>
+                        <SummaryMetric label="Status" value="Disconnected" />
+                        <SummaryMetric label="API Host" value={apiHost} helper="Default production Exchange host" />
+                        <SummaryMetric label="Access" value="Read only" helper="Only Can Read is needed" />
+                        <SummaryMetric label="Whitelist" value="83.235.110.56" helper="Backend public egress IP" />
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {cryptoComMessage ? (
+                  <div className="rounded-lg border border-border bg-secondary/20 px-4 py-3 text-sm text-muted-foreground">
+                    {cryptoComMessage}
+                  </div>
+                ) : null}
+
+                {cryptoComConnected ? (
+                  <div className="space-y-4 rounded-2xl border border-border bg-background/40 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Wallet Snapshot</div>
+                        <div className="mt-2 text-sm text-muted-foreground">
+                          High-level wallet balances returned by the authenticated Exchange API.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <SummaryMetric label="Available" value={formatUsd(cryptoComOverview?.totalAvailableBalanceUsd)} />
+                      <SummaryMetric label="Cash" value={formatUsd(cryptoComOverview?.totalCashBalanceUsd)} />
+                      <SummaryMetric label="Collateral" value={formatUsd(cryptoComOverview?.totalCollateralValueUsd)} />
+                      <SummaryMetric label="Initial Margin" value={formatUsd(cryptoComOverview?.totalInitialMarginUsd)} />
+                      <SummaryMetric label="Maintenance" value={formatUsd(cryptoComOverview?.totalMaintenanceMarginUsd)} />
+                    </div>
+
+                    {topBalances.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-border bg-secondary/20 px-4 py-8 text-center text-sm text-muted-foreground">
+                        No non-zero Crypto.com balances were returned.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-border">
+                        <table className="w-full min-w-[620px]">
+                          <thead>
+                            <tr className="border-b border-border">
+                              {["Asset", "Quantity", "Reserved", "Market Value", "Max Withdraw"].map((heading) => (
+                                <th
+                                  key={heading}
+                                  className="px-4 py-3 text-right text-[11px] font-mono uppercase tracking-wider text-muted-foreground first:text-left"
+                                >
+                                  {heading}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {topBalances.map((asset) => (
+                              <tr key={asset.currency} className="border-b border-border last:border-b-0">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary/20">
+                                      <Wallet className="h-4 w-4 text-primary" />
+                                    </div>
+                                    <div className="text-sm font-mono font-semibold text-foreground">{asset.currency}</div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                  {formatToken(asset.quantity, asset.currency)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                  {formatToken(asset.reservedQuantity, asset.currency)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-sm font-mono text-foreground">
+                                  {formatUsd(asset.marketValueUsd)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-sm font-mono text-muted-foreground">
+                                  {formatToken(asset.maxWithdrawalBalance, asset.currency)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {shouldShowCryptoForm ? (
+                  <div className="space-y-4 rounded-2xl border border-border bg-background/40 p-4">
+                    <div>
+                      <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                        {cryptoComConnected ? "Replace Credentials" : "Connect Credentials"}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        {cryptoComConnected
+                          ? "Paste a new Exchange API key pair only when you want to rotate the stored credentials."
+                          : "Paste the Crypto.com Exchange API key and one-time secret shown when the key was created."}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Key</label>
+                        <Input
+                          value={apiKey}
+                          onChange={(event) => setApiKey(event.target.value)}
+                          className="mt-1 border-border bg-secondary/10 font-mono"
+                          placeholder="Paste Crypto.com API key"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">API Host</label>
+                        <Input
+                          value={apiHost}
+                          onChange={(event) => setApiHost(event.target.value)}
+                          className="mt-1 border-border bg-secondary/10 font-mono"
+                          placeholder="https://api.crypto.com"
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Secret Key</label>
+                      <Input
+                        type="password"
+                        value={apiSecret}
+                        onChange={(event) => setApiSecret(event.target.value)}
+                        className="mt-1 border-border bg-secondary/10 font-mono"
+                        placeholder="Paste Crypto.com secret key"
+                        autoComplete="off"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        onClick={() => connectCryptoComMutation.mutate()}
+                        disabled={isCryptoComBusy || !apiKey.trim() || !apiSecret.trim()}
+                        className="bg-primary text-primary-foreground"
+                      >
+                        <Link2 className="h-4 w-4" />
+                        {connectCryptoComMutation.isPending ? "Connecting..." : cryptoComConnected ? "Replace credentials" : "Connect Crypto.com"}
+                      </Button>
+                      {cryptoComConnected ? (
+                        <Button type="button" variant="outline" onClick={() => setShowCryptoComCredentialForm(false)}>
+                          Hide form
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </CollapsibleContent>
           </Card>
-        </div>
+        </Collapsible>
+
+        {(["kraken", "coinbase"] as const).map((exchange) => {
+          const health = healthByExchange.get(exchange);
+          const online = health?.status === "online";
+
+          return (
+            <Collapsible key={exchange} open={isPanelOpen(exchange)} onOpenChange={(open) => setPanelOpen(exchange, open)}>
+              <Card className="animate-fade-up">
+                <CardHeader className="pb-0">
+                  <CollapsibleTrigger asChild>
+                    <button type="button" className="flex w-full items-start py-5 text-left">
+                      <ExchangePanelHeader
+                        eyebrow="Public Venue"
+                        title={formatExchangeLabel(exchange)}
+                        description="Expand for public feed health, last update time, and venue-specific market data notes."
+                        open={isPanelOpen(exchange)}
+                        badges={
+                          <>
+                            <span
+                              className={cn(
+                                "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider",
+                                statusBadge(online)
+                              )}
+                            >
+                              {online ? "Public feed online" : "Public feed offline"}
+                            </span>
+                            <span className="inline-flex items-center rounded-full border border-border bg-secondary/20 px-2.5 py-1 text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                              Updated {formatTimestamp(health?.timestamp)}
+                            </span>
+                          </>
+                        }
+                      />
+                    </button>
+                  </CollapsibleTrigger>
+                </CardHeader>
+
+                <CollapsibleContent>
+                  <CardContent className="space-y-4 pb-5">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <SummaryMetric label="Feed" value={online ? "Online" : "Offline"} />
+                      <SummaryMetric label="Updated" value={formatTimestamp(health?.timestamp)} />
+                      <SummaryMetric label="Visibility" value="Market Intel" helper="Public market data only" />
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-secondary/15 p-4 text-sm text-muted-foreground">
+                      <div className="flex items-start gap-3">
+                        {online ? <Activity className="mt-0.5 h-4 w-4 text-primary" /> : <WifiOff className="mt-0.5 h-4 w-4 text-negative" />}
+                        <div>
+                          {health?.message
+                            ? health.message
+                            : "Market data is available in the Market Intel tab for this venue."}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+          );
+        })}
       </div>
     </div>
   );
