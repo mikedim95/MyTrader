@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowLeftRight, Coins, Landmark, TrendingDown, TrendingUp } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, Coins, TrendingDown, TrendingUp } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -312,25 +312,11 @@ export function PortfolioTradeDialogs({
 
   return (
     <>
-      <div className="rounded-xl border border-border bg-card p-5 animate-fade-up">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Manual Trade</div>
-            <div className="mt-2 text-sm text-muted-foreground">
-              Buy or sell directly from the portfolio. Rates are simulated on Kraken or Crypto.com with your chosen USD or EUR quote.
-            </div>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-secondary/30 px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-            <Landmark className="h-3.5 w-3.5" />
-            Portfolio flow
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap gap-3">
+      <div className="grid grid-cols-2 divide-x divide-border overflow-hidden rounded-xl border border-border animate-fade-up">
           <Button
             type="button"
             onClick={() => openFlow("buy")}
-            className="border border-positive/30 bg-positive/15 text-positive hover:bg-positive/20"
+            className="h-16 rounded-none border-0 bg-positive/14 font-mono text-base text-positive hover:bg-positive/20"
           >
             <TrendingUp className="h-4 w-4" />
             Buy
@@ -338,12 +324,11 @@ export function PortfolioTradeDialogs({
           <Button
             type="button"
             onClick={() => openFlow("sell")}
-            className="border border-negative/30 bg-negative/15 text-negative hover:bg-negative/20"
+            className="h-16 rounded-none border-0 bg-negative/14 font-mono text-base text-negative hover:bg-negative/20"
           >
             <TrendingDown className="h-4 w-4" />
             Sell
           </Button>
-        </div>
       </div>
 
       <Dialog open={Boolean(action) && step === "asset"} onOpenChange={(open) => !open && closeFlow()}>
