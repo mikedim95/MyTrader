@@ -46,7 +46,7 @@ interface UserBalanceResult {
 const CRYPTO_COM_ERROR_HINTS: Record<number, string> = {
   202: "Crypto.com reports that the Exchange account is suspended.",
   40101:
-    "Verify the Exchange API key and secret, and make sure you are using a Crypto.com Exchange API key rather than a Crypto.com App key.",
+    "Crypto.com rejected the key or signature. Confirm the API key and secret belong together, the key creation was finalized with 2FA, and you are using the one-time secret shown when the key was created.",
   40102: "The backend clock is out of sync by more than 60 seconds.",
   40103: "Whitelist the backend server's public egress IP in the Crypto.com Exchange API key settings.",
   40104: "This account tier is not allowed to use the requested endpoint.",
@@ -102,7 +102,7 @@ function formatCryptoComError(responseStatus: number, code: number | null, messa
 
   if (normalizedMessage) {
     if (/authentication failure/i.test(normalizedMessage)) {
-      return `${normalizedMessage} Verify the Exchange API key and secret, and if the key is IP-whitelisted, allow the backend server's public egress IP.`;
+      return `${normalizedMessage} Crypto.com uses 40101 for key or signature mismatches and 40103 for IP whitelist failures. Recheck the API key and secret pair first.`;
     }
     return code !== null ? `${normalizedMessage} (${code})` : normalizedMessage;
   }
