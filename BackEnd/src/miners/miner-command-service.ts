@@ -29,12 +29,15 @@ export class MinerCommandService {
     body?: unknown,
     authorizationMode: "raw" | "bearer" = "raw"
   ): Promise<unknown> {
-    void authorizationMode;
-
-    // VNish write endpoints behave like an unlocked session on the miner host.
-    // Refresh the unlock first, then send the write exactly as a plain POST.
-    await this.authService.getFreshToken(miner);
-    return this.httpClient.post<unknown>(miner.apiBaseUrl, path, body);
+    const token = await this.authService.getFreshToken(miner);
+    return this.httpClient.post<unknown>(
+      miner.apiBaseUrl,
+      path,
+      body,
+      token,
+      () => this.authService.retryWithFreshToken(miner),
+      authorizationMode
+    );
   }
 
   private async logCompletedCommand(
