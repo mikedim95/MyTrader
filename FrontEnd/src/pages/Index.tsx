@@ -73,9 +73,21 @@ const Index = ({ session, onLogout }: IndexProps) => {
   const renderPage = () => {
     switch (currentPage) {
       case "portfolio":
-        return <PortfolioPage accountType={accountType} />;
+        return (
+          <PortfolioPage
+            accountType={accountType}
+            onOpenExchangeConnections={() => {
+              setExchangesTab("connections");
+              setCurrentPage("exchange-intelligence");
+            }}
+            onOpenExchangeMarket={() => {
+              setExchangesTab("market-intel");
+              setCurrentPage("exchange-intelligence");
+            }}
+          />
+        );
       case "exchange-intelligence":
-        return <ExchangesHubPage activeTab={exchangesTab} onTabChange={setExchangesTab} />;
+        return <ExchangesHubPage accountType={accountType} activeTab={exchangesTab} onTabChange={setExchangesTab} />;
       case "execution-simulator":
         return <ExecutionSimulatorPage />;
       case "rebalance":

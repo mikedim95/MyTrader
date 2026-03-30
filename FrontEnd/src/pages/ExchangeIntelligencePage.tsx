@@ -1,17 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle } from "lucide-react";
+import { AssetDetailsDialog } from "@/components/AssetDetailsDialog";
 import { ExchangeHealthCard } from "@/components/exchange-intelligence/ExchangeHealthCard";
 import { ComparisonTable, type ExchangeComparisonRow } from "@/components/exchange-intelligence/ComparisonTable";
 import { PairSelector } from "@/components/exchange-intelligence/PairSelector";
 import { RecommendationBox } from "@/components/exchange-intelligence/RecommendationBox";
+import { HoldingsTable } from "@/components/portfolio/HoldingsTable";
 import {
+  useDashboardData,
   useExchangeComparison,
   useExchangeHealth,
   useExchangeOrderBookSummary,
   useExchangePairs,
   useExchangeTicker,
+  useTradingAssets,
 } from "@/hooks/useTradingData";
-import type { ExchangeId, ExchangeMarketSymbol } from "@/types/api";
+import type { Asset, ExchangeId, ExchangeMarketSymbol, PortfolioAccountType } from "@/types/api";
 
 const FALLBACK_PAIRS: ExchangeMarketSymbol[] = ["BTC-USD", "ETH-USD", "BTC-EUR", "ETH-EUR"];
 const EXCHANGES: ExchangeId[] = ["kraken", "coinbase", "crypto.com"];
@@ -19,13 +23,16 @@ const DEFAULT_SYMBOL: ExchangeMarketSymbol = "BTC-USD";
 const ORDER_BOOK_DEPTH = 10;
 
 interface ExchangeIntelligencePageProps {
+  accountType: PortfolioAccountType;
   embedded?: boolean;
 }
 
-export function ExchangeIntelligencePage({ embedded = false }: ExchangeIntelligencePageProps) {
+export function ExchangeIntelligencePage({ accountType, embedded = false }: ExchangeIntelligencePageProps) {
   const [selectedSymbol, setSelectedSymbol] = useState<ExchangeMarketSymbol>(DEFAULT_SYMBOL);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
 
   const { data: healthData, isPending: loadingHealth, error: healthError } = useExchangeHealth();
+  const { data: portfolioData, isPending: loadingPortfolio } = useDashboardData(accountType);
   const { data: pairsData } = useExchangePairs();
   const { data: tickerData, isPending: loadingTicker, error: tickerError } = useExchangeTicker(selectedSymbol);
   const { data: orderBookData, isPending: loadingOrderBook, error: orderBookError } = useExchangeOrderBookSummary(
@@ -33,8 +40,11 @@ export function ExchangeIntelligencePage({ embedded = false }: ExchangeIntellige
     ORDER_BOOK_DEPTH,
   );
   const { data: comparisonData, isPending: loadingComparison, error: comparisonError } = useExchangeComparison(selectedSymbol);
+  const { data: tradingAssetsData } = useTradingAssets(accountType);
 
   const pairs = pairsData?.pairs?.length ? pairsData.pairs : FALLBACK_PAIRS;
+  const assets = portfolioData?.assets ?? [];
+  const tradingAssets = tradingAssetsData?.assets ?? [];
 
   useEffect(() => {
     if (!pairs.includes(selectedSymbol)) {
@@ -104,9 +114,31 @@ export function ExchangeIntelligencePage({ embedded = false }: ExchangeIntellige
 
       <ComparisonTable symbol={selectedSymbol} depth={ORDER_BOOK_DEPTH} rows={comparisonRows} isLoading={loadingTable} />
 
+      <HoldingsTable
+        accountType={accountType}
+        assets={assets}
+        description="Portfolio holdings now live in the market tab so your venue comparison and current exposure stay in one place."
+        isLoading={loadingPortfolio && !portfolioData}
+        onSelectAsset={setSelectedAsset}
+      />
+
       <div className="rounded-lg border border-border bg-secondary/30 p-4 text-sm text-muted-foreground">
         Public endpoints only. No API keys, no trading actions, and no exchange-specific payloads reach the frontend.
       </div>
+
+      <AssetDetailsDialog
+        asset={selectedAsset}
+        open={Boolean(selectedAsset)}
+        accountType={accountType}
+        portfolioTotalValue={portfolioData?.totalPortfolioValue ?? 0}
+        tradingAssets={tradingAssets}
+        recentActivity={portfolioData?.recentActivity ?? []}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedAsset(null);
+          }
+        }}
+      />
     </div>
   );
 }
